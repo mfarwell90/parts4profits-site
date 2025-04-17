@@ -60,7 +60,7 @@ export default function SearchForm() {
       {/* Flip Score Legend */}
       <p style={{ marginTop: '1rem', fontSize: '0.9em', color: '#555' }}>
         <strong>Flip Score:</strong>{' '}
-		{'🔥 > $200'},{' '}
+		{'🔥 &gt $200'},{' '}
 		{⭐ $40–$199.99'},{' '}
 		{🗑️ ≤ $39.99'}
       </p>
@@ -73,7 +73,7 @@ export default function SearchForm() {
           onChange={e => setFireOnly(e.target.checked)}
           style={{ marginRight: '0.5rem' }}
         />
-        Show Fire Flips Only 🔥 (>$200)
+        Show Fire Flips Only 🔥 (&gt;$200)
       </label>
 
       {/* Results */}
