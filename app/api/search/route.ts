@@ -1,68 +1,72 @@
+// app/api/search/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET(request: NextRequest) {
-  // 1) derive origin from incoming request
-  const requrl = new URL(request.url)
-  const origin = requrl.origin
+type ItemSummary = {
+  title: string
+  price?: { value?: number; currency?: string }
+  thumbnailImages?: Array<{ imageUrl?: string }>
+  itemWebUrl: string
+  itemEndDate?: string
+}
 
-  // 2) fetch OAuth token
+type BrowseResponse = {
+  itemSummaries?: ItemSummary[]
+}
+
+export async function GET(request: NextRequest) {
+  // 1) derive your own origin so we can call our token endpoint
+  const origin = new URL(request.url).origin
+
+  // 2) fetch eBay OAuth token from your /api/ebay-token route
   const tokenRes = await fetch(`${origin}/api/ebay-token`)
   if (!tokenRes.ok) {
-    const errText = await tokenRes.text()
+    const txt = await tokenRes.text()
     return NextResponse.json(
-      { error: `Token fetch failed: ${errText}` },
+      { error: `Token fetch failed: ${txt}` },
       { status: tokenRes.status }
     )
   }
   const { token } = (await tokenRes.json()) as { token: string }
 
-  // parse query params
-  const { searchParams } = new URL(request.url);
-  const year = searchParams.get('year') || '';
-  const make = searchParams.get('make') || '';
-  const model = searchParams.get('model') || '';
-  const details = searchParams.get('details') || '';
+  // 3) pull the year/make/model/details out of the query
+  const url = new URL(request.url)
+  const year    = url.searchParams.get('year')    ?? ''
+  const make    = url.searchParams.get('make')    ?? ''
+  const model   = url.searchParams.get('model')   ?? ''
+  const details = url.searchParams.get('details') ?? ''
 
-  const rawQuery = `${year} ${make} ${model} ${details}`.trim();
-  const encodedQuery = encodeURIComponent(rawQuery);
+  const rawQuery     = `${year} ${make} ${model} ${details}`.trim()
+  const encodedQuery = encodeURIComponent(rawQuery)
 
-  // call eBay Browse API
-  const apiUrl =
-    `https://api.ebay.com/buy/browse/v1/item_summary/search?` +
-    `q=${encodedQuery}&filter=conditions:{USED}&limit=20&sort=END_TIME`;
+  // 4) build & call the eBay Browse API
+  const apiUrl = 
+    `https://api.ebay.com/buy/browse/v1/item_summary/search` +
+    `?q=${encodedQuery}&filter=conditions:{USED}&limit=20&sort=END_TIME`
 
-  const resp = await fetch(url, {
+  const resp = await fetch(apiUrl, {
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
+      'Content-Type':  'application/json',
     },
-  });
-
+  })
   if (!resp.ok) {
-    const errText = await resp.text();
-    return NextResponse.json({ error: `Browse API failed: ${errText}` }, { status: resp.status });
+    const txt = await resp.text()
+    return NextResponse.json(
+      { error: `Browse API failed: ${txt}` },
+      { status: resp.status }
+    )
   }
 
-  // type annotate response
-  const data = await resp.json() as {
-    itemSummaries?: Array<{
-      title: string;
-      price?: { value: number; currency?: string };
-      thumbnailImages?: Array<{ imageUrl: string }>;
-      itemWebUrl: string;
-      itemEndDate: string;
-    }>;
-  };
+  // 5) type‐annotate & transform the response
+  const data  = (await resp.json()) as BrowseResponse
+  const items = (data.itemSummaries ?? []).map(item => ({
+    title:    item.title,
+    price:    item.price?.value?.toString() ?? '',
+    currency: item.price?.currency,
+    image:    item.thumbnailImages?.[0]?.imageUrl,
+    link:     item.itemWebUrl,
+    soldDate: item.itemEndDate,
+  }))
 
-  // extract only needed fields
-  const items = (data.itemSummaries || []).map((it) => ({
-    title: it.title,
-    price: it.price?.value ?? '',
-    currency: it.price?.currency,
-    image: it.thumbnailImages?.[0]?.imageUrl,
-    link: it.itemWebUrl,
-    soldDate: it.itemEndDate,
-  }));
-
-  return NextResponse.json(items);
+  return NextResponse.json(items)
 }
