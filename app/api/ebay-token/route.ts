@@ -1,7 +1,7 @@
 // app/api/ebay-token/route.ts
 import { NextResponse } from 'next/server'
 
-export async function GET(request: Request) {
+export async function GET() {
   const clientId = process.env.EBAY_CLIENT_ID
   const clientSecret = process.env.EBAY_CLIENT_SECRET
   const scope = process.env.EBAY_API_SCOPE

@@ -41,7 +41,7 @@ export async function GET(request: Request) {
 
   // 4) pick out only the fields we need
   const data = await resp.json()
-  const items = (data.itemSummaries || []).map((it: any) => ({
+  const items = (data.itemSummaries || []).map((it => ({
     title:    it.title,
     price:    it.price?.value     ?? '',
     currency: it.price?.currency,
