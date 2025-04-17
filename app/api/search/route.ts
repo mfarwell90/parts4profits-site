@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(request: NextRequest) {
   // 1) derive origin from incoming request
-  const url = new URL(request.url)
-  const origin = url.origin
+  const requrl = new URL(request.url)
+  const origin = requrl.origin
 
   // 2) fetch OAuth token
   const tokenRes = await fetch(`${origin}/api/ebay-token`)
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   const encodedQuery = encodeURIComponent(rawQuery);
 
   // call eBay Browse API
-  const url =
+  const apiUrl =
     `https://api.ebay.com/buy/browse/v1/item_summary/search?` +
     `q=${encodedQuery}&filter=conditions:{USED}&limit=20&sort=END_TIME`;
 
