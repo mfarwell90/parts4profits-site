@@ -28,7 +28,7 @@ export default function SearchForm() {
       const qs = new URLSearchParams({ year, make, model, details })
       const res = await fetch(`/api/search?${qs.toString()}`)
       let data: Item[] = await res.json()
-      if (fireOnly) data = data.filter((it) => parseFloat(it.price) > 200)
+      if (fireOnly) data = data.filter(it => parseFloat(it.price) > 200)
       setResults(data)
     } finally {
       setLoading(false)
@@ -48,9 +48,9 @@ export default function SearchForm() {
         onSubmit={handleSubmit}
         style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}
       >
-        <input placeholder="Year"       value={year}    onChange={e => setYear(e.target.value)}    required />
-        <input placeholder="Make"       value={make}    onChange={e => setMake(e.target.value)}    required />
-        <input placeholder="Model"      value={model}   onChange={e => setModel(e.target.value)}   required />
+        <input placeholder="Year" value={year} onChange={e => setYear(e.target.value)} required />
+        <input placeholder="Make" value={make} onChange={e => setMake(e.target.value)} required />
+        <input placeholder="Model" value={model} onChange={e => setModel(e.target.value)} required />
         <input placeholder="Details (opt.)" value={details} onChange={e => setDetails(e.target.value)} />
         <button type="submit" disabled={loading}>
           {loading ? 'Searching…' : 'Search'}
@@ -59,10 +59,7 @@ export default function SearchForm() {
 
       {/* Flip Score Legend */}
       <p style={{ marginTop: '1rem', fontSize: '0.9em', color: '#555' }}>
-        <strong>Flip Score:</strong>{' '}
-		{'🔥 &gt $200'},{' '}
-		{⭐ $40–$199.99'},{' '}
-		{🗑️ ≤ $39.99'}
+        <strong>Flip Score:</strong> 🔥 &gt; $200, ⭐ $40–$199.99, 🗑️ ≤ $39.99
       </p>
 
       {/* Fire Flips Only */}
@@ -73,7 +70,7 @@ export default function SearchForm() {
           onChange={e => setFireOnly(e.target.checked)}
           style={{ marginRight: '0.5rem' }}
         />
-        Show Fire Flips Only 🔥 (&gt;$200)
+        Show Fire Flips Only 🔥 (&gt;$200)
       </label>
 
       {/* Results */}
