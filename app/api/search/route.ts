@@ -20,32 +20,33 @@ type Item = {
 
 export async function GET(request: Request) {
   try {
-    // 1) Extract query params
-    const { searchParams } = new URL(request.url)
-    const year    = searchParams.get('year')    || ''
-    const make    = searchParams.get('make')    || ''
-    const model   = searchParams.get('model')   || ''
-    const details = searchParams.get('details') || ''
+    // 1) grab query‑string params
+    const urlObj = new URL(request.url)
+    const params = urlObj.searchParams
+    const year    = params.get('year')    || ''
+    const make    = params.get('make')    || ''
+    const model   = params.get('model')   || ''
+    const details = params.get('details') || ''
     const query   = [year, make, model, details].filter(Boolean).join(' ')
 
-    // 2) Grab your eBay token
-    const origin = new URL(request.url).origin
+    // 2) fetch your server‑side token endpoint
+    const origin   = urlObj.origin
     const tokenRes = await fetch(`${origin}/api/ebay-token`)
-    if (!tokenRes.ok) throw new Error('Token fetch failed')
+    if (!tokenRes.ok) throw new Error('eBay token fetch failed')
     const { token } = (await tokenRes.json()) as { token: string }
 
-    // 3) Fetch sold/used items from eBay Browse API
-    const url = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search')
-    url.searchParams.set('q', query)
-    url.searchParams.set('filter', 'conditions:{USED}')
-    url.searchParams.set('limit', '20')
-    url.searchParams.set('sort', 'END_TIME')
+    // 3) call the eBay Browse API for USED & SOLD items
+    const apiUrl = new URL('https://api.ebay.com/buy/browse/v1/item_summary/search')
+    apiUrl.searchParams.set('q', query)
+    apiUrl.searchParams.set('filter', 'conditions:{USED}')
+    apiUrl.searchParams.set('limit', '20')
+    apiUrl.searchParams.set('sort', 'END_TIME')
 
-    const resp = await fetch(url.toString(), {
+    const resp = await fetch(apiUrl.toString(), {
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      }
+        'Content-Type':  'application/json',
+      },
     })
     if (!resp.ok) {
       const errText = await resp.text()
@@ -53,7 +54,7 @@ export async function GET(request: Request) {
     }
 
     const data = (await resp.json()) as { itemSummaries?: ItemSummary[] }
-    const items = (data.itemSummaries || []).map((it) => ({
+    const items: Item[] = (data.itemSummaries || []).map(it => ({
       title:    it.title,
       price:    it.price.value,
       currency: it.price.currency,
@@ -63,8 +64,9 @@ export async function GET(request: Request) {
     }))
 
     return NextResponse.json(items)
-  } catch (e: any) {
-    console.error(e)
-    return NextResponse.json({ error: e.message || 'Unknown error' }, { status: 500 })
+  } catch (error: unknown) {
+    console.error(error)
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
