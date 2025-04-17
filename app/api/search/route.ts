@@ -1,13 +1,20 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server'
 
-export async function GET(request: Request) {
-  // fetch eBay OAuth token
-  const tokenRes = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/ebay-token`);
+export async function GET(request: NextRequest) {
+  // 1) derive origin from incoming request
+  const url = new URL(request.url)
+  const origin = url.origin
+
+  // 2) fetch OAuth token
+  const tokenRes = await fetch(`${origin}/api/ebay-token`)
   if (!tokenRes.ok) {
-    const errText = await tokenRes.text();
-    return NextResponse.json({ error: `Token fetch failed: ${errText}` }, { status: tokenRes.status });
+    const errText = await tokenRes.text()
+    return NextResponse.json(
+      { error: `Token fetch failed: ${errText}` },
+      { status: tokenRes.status }
+    )
   }
-  const { token } = await tokenRes.json() as { token: string };
+  const { token } = (await tokenRes.json()) as { token: string }
 
   // parse query params
   const { searchParams } = new URL(request.url);
