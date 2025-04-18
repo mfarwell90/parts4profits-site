@@ -1,8 +1,8 @@
-import { NextRequest } from 'next/server';
 import crypto from 'crypto';
 
-export async function GET(req: NextRequest) {
-  const challengeCode = req.nextUrl.searchParams.get('challenge_code') || '';
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const challengeCode = searchParams.get('challenge_code') || '';
 
   const verificationToken = 'wrenchmasterparts4profitsverification';
   const endpoint = 'https://parts4profits.com/api/verify';
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const body = await req.json();
   console.log('Received eBay Account Deletion Notification:', body);
 
