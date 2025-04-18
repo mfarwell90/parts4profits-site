@@ -1,11 +1,13 @@
-// app/api/verify/route.ts
+// File: app/api/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-export const runtime = 'nodejs'  // so we can use crypto.createHash
+// run under Node so crypto.createHash is available
+export const runtime = 'nodejs'
 
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url)
+export async function GET(request: NextRequest) {
+  // 1) grab the random code eBay sent us
+  const url = new URL(request.url)
   const challenge = url.searchParams.get('challenge_code')
   if (!challenge) {
     return NextResponse.json(
@@ -14,6 +16,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // 2) load your secret and re‑build the exact URL eBay called
   const token = process.env.EBAY_VERIFICATION_TOKEN
   if (!token) {
     return NextResponse.json(
@@ -21,31 +24,31 @@ export async function GET(req: NextRequest) {
       { status: 500 }
     )
   }
-
-  // Build the exact endpoint string eBay called us on:
   const endpoint = url.origin + url.pathname
 
-  // Hash in the order eBay expects: challenge + token + endpoint
+  // 3) hash in the required order: challenge + token + endpoint
   const hash = createHash('sha256')
     .update(challenge)
     .update(token)
     .update(endpoint)
     .digest('hex')
 
+  // 4) reply with exactly this shape
   return NextResponse.json({ challengeResponse: hash })
 }
 
-export async function POST(req: NextRequest) {
-  // eBay will POST you JSON when a user actually deletes their account
-  let body: unknown
+export async function POST(request: NextRequest) {
+  // eBay will POST you JSON on real deletions
+  let payload: unknown
   try {
-    body = await req.json()
+    payload = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  console.log('🗑️  Account deletion notification:', JSON.stringify(body, null, 2))
+  // log it (or do whatever you want)
+  console.log('🗑️  eBay deletion payload:', JSON.stringify(payload, null, 2))
 
-  // (You can swap in your MailerSend or whatever here, but it’s optional.)
-  return NextResponse.json({ message: 'Logged successfully.' })
+  // ack back a 200
+  return NextResponse.json({ received: true })
 }
