@@ -1,29 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-export async function GET(request: NextRequest) {
-  const verificationToken = process.env.EBAY_VERIFICATION_TOKEN!
-  const endpointUrl = 'https://parts4profits.com/api/verify'
-
-  const url = new URL(request.url)
-  const challengeCode = url.searchParams.get('challenge_code') || ''
+export async function GET(req: NextRequest) {
+  const challenge = req.nextUrl.searchParams.get('challenge_code')!
+  const token     = process.env.EBAY_VERIFICATION_TOKEN!
+  const endpoint  = 'https://parts4profits.com/api/verify'
 
   const hash = createHash('sha256')
-  hash.update(challengeCode)
-  hash.update(verificationToken)
-  hash.update(endpointUrl)
+  hash.update(challenge)
+  hash.update(token)
+  hash.update(endpoint)
 
-  const challengeResponse = hash.digest('hex')
-  return NextResponse.json({ challengeResponse })
+  return NextResponse.json({ challengeResponse: hash.digest('hex') })
 }
 
-export async function POST(request: NextRequest) {
-  // eBay will POST your notification here
-  const payload = await request.json()
-  console.log('🔔 eBay deletion event:', payload)
-
-  // (optionally send yourself an email)
-  // …
-
+export async function POST(req: NextRequest) {
+  const body = await req.json()
+  console.log('🔔 Account‑deletion notification:', body)
+  // …your email‑alert or logging logic…
   return NextResponse.json({ status: 'received' })
 }
