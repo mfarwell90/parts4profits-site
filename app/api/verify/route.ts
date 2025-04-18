@@ -1,17 +1,29 @@
-// app/api/verify/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server'
+import { createHash } from 'crypto'
 
-// 1) eBay sends a GET during subscription setup with ?hub.challenge=xxx
-export function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const challenge = searchParams.get('hub.challenge') || '';
-  // reply with the raw challenge text
-  return new NextResponse(challenge, { status: 200 });
+export async function GET(request: NextRequest) {
+  const verificationToken = process.env.EBAY_VERIFICATION_TOKEN!
+  const endpointUrl = 'https://parts4profits.com/api/verify'
+
+  const url = new URL(request.url)
+  const challengeCode = url.searchParams.get('challenge_code') || ''
+
+  const hash = createHash('sha256')
+  hash.update(challengeCode)
+  hash.update(verificationToken)
+  hash.update(endpointUrl)
+
+  const challengeResponse = hash.digest('hex')
+  return NextResponse.json({ challengeResponse })
 }
 
-// 2) eBay will POST actual “account deletion” events here later
-export async function POST(req: NextRequest) {
-  // you could verify req.json().verificationToken if you like…
-  // for now just return 200 so eBay knows you got it
-  return NextResponse.json({ acknowledged: true });
+export async function POST(request: NextRequest) {
+  // eBay will POST your notification here
+  const payload = await request.json()
+  console.log('🔔 eBay deletion event:', payload)
+
+  // (optionally send yourself an email)
+  // …
+
+  return NextResponse.json({ status: 'received' })
 }
