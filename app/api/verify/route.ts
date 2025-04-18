@@ -4,7 +4,7 @@ import crypto from 'crypto';
 export async function GET(req: NextRequest) {
   const challengeCode = req.nextUrl.searchParams.get('challenge_code') || '';
   const verificationToken = process.env.EBAY_VERIFICATION_TOKEN || '';
-  const endpoint = 'https://parts4profits.com/api/ebay/account-deletion'; // Must match eBay exactly
+  const endpoint = 'https://parts4profits.com/api/verify'; // <-- This must match EXACTLY what you gave eBay
 
   const combined = challengeCode + verificationToken + endpoint;
   const hash = crypto.createHash('sha256').update(combined).digest('hex');
