@@ -1,12 +1,11 @@
-// File: app/api/verify/route.ts
+// app/api/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-// run under Node so crypto.createHash is available
+// 1) Force this file to run under Node.js (so crypto.createHash works)
 export const runtime = 'nodejs'
 
 export async function GET(request: NextRequest) {
-  // 1) grab the random code eBay sent us
   const url = new URL(request.url)
   const challenge = url.searchParams.get('challenge_code')
   if (!challenge) {
@@ -16,7 +15,6 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  // 2) load your secret and re‑build the exact URL eBay called
   const token = process.env.EBAY_VERIFICATION_TOKEN
   if (!token) {
     return NextResponse.json(
@@ -24,31 +22,32 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
+
+  // 2) Re‑construct the exact endpoint eBay called (origin + path, no query)
   const endpoint = url.origin + url.pathname
 
-  // 3) hash in the required order: challenge + token + endpoint
-  const hash = createHash('sha256')
+  // 3) Hash in the order eBay demands: challenge + verificationToken + endpoint
+  const challengeResponse = createHash('sha256')
     .update(challenge)
     .update(token)
     .update(endpoint)
     .digest('hex')
 
-  // 4) reply with exactly this shape
-  return NextResponse.json({ challengeResponse: hash })
+  // 4) Reply with exactly this JSON shape
+  return NextResponse.json({ challengeResponse })
 }
 
 export async function POST(request: NextRequest) {
-  // eBay will POST you JSON on real deletions
-  let payload: unknown
+  // eBay will POST real deletion events here
+  let body: unknown
   try {
-    payload = await request.json()
+    body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // log it (or do whatever you want)
-  console.log('🗑️  eBay deletion payload:', JSON.stringify(payload, null, 2))
+  console.log('📬 eBay deletion payload:', JSON.stringify(body, null, 2))
 
-  // ack back a 200
+  // ACK with a 200 so eBay knows you got it
   return NextResponse.json({ received: true })
 }
