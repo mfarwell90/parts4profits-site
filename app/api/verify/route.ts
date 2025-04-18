@@ -4,16 +4,16 @@ import crypto from 'crypto';
 export async function GET(req: NextRequest) {
   const challengeCode = req.nextUrl.searchParams.get('challenge_code') || '';
 
-  // Hardcoded verification token
   const verificationToken = 'wrenchmasterparts4profitsverification';
-
-  // Must match EXACTLY what you gave eBay (no slash at the end!)
   const endpoint = 'https://parts4profits.com/api/verify';
 
-  const combined = challengeCode + verificationToken + endpoint;
-  const hash = crypto.createHash('sha256').update(combined).digest('hex');
+  const hash = crypto.createHash('sha256');
+  hash.update(challengeCode);
+  hash.update(verificationToken);
+  hash.update(endpoint);
+  const challengeResponse = hash.digest('hex');
 
-  return new Response(JSON.stringify({ challengeResponse: hash }), {
+  return new Response(JSON.stringify({ challengeResponse }), {
     status: 200,
     headers: {
       'Content-Type': 'application/json',
