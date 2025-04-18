@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   // 4) build & call the eBay Browse API
   const apiUrl = 
     `https://api.ebay.com/buy/browse/v1/item_summary/search` +
-    `?q=${encodedQuery}&filter=conditions:{USED}&limit=20&sort=END_TIME`
+    `?q=${encodedQuery}&filter=conditions:{USED}&limit=40&sort=END_TIME`
 
   const resp = await fetch(apiUrl, {
     headers: {

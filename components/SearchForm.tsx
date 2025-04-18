@@ -1,4 +1,3 @@
-// components/SearchForm.tsx
 'use client'
 
 import { useState } from 'react'
@@ -20,13 +19,14 @@ export default function SearchForm() {
   const [results, setResults] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
+  const [showActive, setShowActive] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      const res = await fetch(`/api/search?${qs.toString()}`)
+      const res = await fetch(`/api/search?${qs.toString()}`) // still sold data for now
       let data: Item[] = await res.json()
       if (fireOnly) data = data.filter(it => parseFloat(it.price) > 200)
       setResults(data)
@@ -35,7 +35,6 @@ export default function SearchForm() {
     }
   }
 
-  // Build the “see all” URL
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
   const ebayUrl =
     `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}` +
@@ -72,6 +71,26 @@ export default function SearchForm() {
         />
         Show Fire Flips Only 🔥 (&gt;$200)
       </label>
+
+      {/* Toggle for Active Listings */}
+      <label style={{ cursor: 'pointer', marginBottom: '0.5rem' }}>
+        <input
+          type="checkbox"
+          checked={showActive}
+          onChange={() => setShowActive(!showActive)}
+          style={{ marginRight: '0.5rem' }}
+        />
+        Show Active Listings (via eBay Partner Network)
+      </label>
+
+      {/* Affiliate Disclaimer */}
+      {showActive && (
+        <p style={{ fontSize: '0.75rem', color: '#888', maxWidth: '600px', marginBottom: '1rem', textAlign: 'center' }}>
+          Disclaimer: When you click on links to various merchants on this site and make a purchase, this can result in
+          this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay
+          Partner Network.
+        </p>
+      )}
 
       {/* Results */}
       {loading && <p>Loading results…</p>}
@@ -115,7 +134,6 @@ export default function SearchForm() {
                     <div style={{ marginTop: '0.25rem', color: '#333' }}>
                       {item.currency} {item.price}
                     </div>
-                    {/* New Flip Score line */}
                     <div style={{ marginTop: '0.25rem', fontSize: '0.9em', color: '#555' }}>
                       <strong>Flip Score:</strong> {scoreEmoji}
                     </div>
