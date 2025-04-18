@@ -1,9 +1,10 @@
-// app/api/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-// we need Node's crypto module
 export const runtime = 'nodejs'
+
+const EBAY_VERIFICATION_TOKEN = 'wrenchmasterparts4profitsverification'
+const VERIFY_ENDPOINT = 'https://parts4profits.com/api/verify'
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
@@ -15,20 +16,12 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const token = process.env.EBAY_VERIFICATION_TOKEN
-  if (!token) {
-    return new NextResponse(
-      JSON.stringify({ error: 'Server misconfigured: no EBAY_VERIFICATION_TOKEN' }),
-      { status: 500, headers: { 'content-type': 'application/json' } }
-    )
-  }
-
-  // eBay requires hashing in this exact order:
+  // hash in the exact order eBay wants:
   //   challengeCode + verificationToken + endpointURL
-  const endpoint = url.origin + url.pathname // e.g. https://parts4profits.com/api/verify
+  const endpoint = url.origin + url.pathname
   const hash = createHash('sha256')
     .update(challenge)
-    .update(token)
+    .update(EBAY_VERIFICATION_TOKEN)
     .update(endpoint)
     .digest('hex')
 
@@ -39,7 +32,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  // when actual deletion notifications arrive, eBay will POST JSON here
+  // handle real deletion notifications here
   const body = await req.json()
   console.log('🔔 eBay deletion notice:', body)
   return NextResponse.json({ received: true })
