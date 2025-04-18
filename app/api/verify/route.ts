@@ -2,35 +2,41 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-// IMPORTANT: this must exactly match the URL you give eBay!
-const ENDPOINT_URL = 'https://parts4profits.com/api/verify'
-
-export const runtime = 'nodejs'  // we need Node crypto
+export const runtime = 'nodejs'  // so we can use crypto.createHash
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const challengeCode = searchParams.get('challenge_code')
-  if (!challengeCode) {
-    // we only care about real eBay calls which always include `?challenge_code=…`
-    return NextResponse.json({ error: 'Missing challenge_code' }, { status: 400 })
+  const url = new URL(req.url)
+  const challenge = url.searchParams.get('challenge_code')
+  if (!challenge) {
+    return NextResponse.json(
+      { error: 'Missing challenge_code' },
+      { status: 400 }
+    )
   }
 
-  const verificationToken = process.env.EBAY_VERIFICATION_TOKEN
-  if (!verificationToken) {
-    return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 })
+  const token = process.env.EBAY_VERIFICATION_TOKEN
+  if (!token) {
+    return NextResponse.json(
+      { error: 'Server misconfiguration: no EBAY_VERIFICATION_TOKEN' },
+      { status: 500 }
+    )
   }
 
-  // hash: challengeCode + verificationToken + endpoint
+  // Build the exact endpoint string eBay called us on:
+  const endpoint = url.origin + url.pathname
+
+  // Hash in the order eBay expects: challenge + token + endpoint
   const hash = createHash('sha256')
-    .update(challengeCode)
-    .update(verificationToken)
-    .update(ENDPOINT_URL)
+    .update(challenge)
+    .update(token)
+    .update(endpoint)
+    .digest('hex')
 
-  return NextResponse.json({ challengeResponse: hash.digest('hex') })
+  return NextResponse.json({ challengeResponse: hash })
 }
 
 export async function POST(req: NextRequest) {
-  // real eBay POSTs when a user actually deletes their account
+  // eBay will POST you JSON when a user actually deletes their account
   let body: unknown
   try {
     body = await req.json()
@@ -38,6 +44,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  console.log('🔔 eBay deletion notification:', body)
+  console.log('🗑️  Account deletion notification:', JSON.stringify(body, null, 2))
+
+  // (You can swap in your MailerSend or whatever here, but it’s optional.)
   return NextResponse.json({ message: 'Logged successfully.' })
 }
