@@ -1,8 +1,6 @@
-// app/api/verify/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { createHash } from 'crypto'
 
-// The URL you registered with eBay for deletions:
 const ENDPOINT_URL = 'https://parts4profits.com/api/verify'
 
 export async function GET(req: NextRequest) {
@@ -18,12 +16,11 @@ export async function GET(req: NextRequest) {
   }
 
   const hash = createHash('sha256')
-  hash.update(challengeCode)
-  hash.update(verificationToken)
-  hash.update(ENDPOINT_URL)
-  const challengeResponse = hash.digest('hex')
+    .update(challengeCode)
+    .update(verificationToken)
+    .update(ENDPOINT_URL)
 
-  return NextResponse.json({ challengeResponse })
+  return NextResponse.json({ challengeResponse: hash.digest('hex') })
 }
 
 export async function POST(req: NextRequest) {
@@ -34,10 +31,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  console.log('🔔 Received eBay deletion notification:')
-  console.log(JSON.stringify(body, null, 2))
-
-  // if you ever want to plug in MailerSend or another alert,
-  // you can do it here. For now we just acknowledge.
+  console.log('🔔 eBay account deletion notification:', body)
   return NextResponse.json({ message: 'Logged successfully.' })
 }
