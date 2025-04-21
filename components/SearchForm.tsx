@@ -1,3 +1,4 @@
+// app/components/SearchForm.tsx
 'use client'
 
 import { useState } from 'react'
@@ -26,34 +27,43 @@ export default function SearchForm() {
     setLoading(true)
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      const res = await fetch(`/api/search?${qs.toString()}`) // still sold data for now
+      const endpoint = showActive
+        ? `/api/search-active?${qs.toString()}`
+        : `/api/search?${qs.toString()}`
+      const res = await fetch(endpoint)
       let data: Item[] = await res.json()
-      if (fireOnly) data = data.filter(it => parseFloat(it.price) > 200)
+      if (fireOnly) {
+        data = data.filter(it => parseFloat(it.price) > 200)
+      }
       setResults(data)
+    } catch (err) {
+      console.error('Search failed', err)
     } finally {
       setLoading(false)
     }
   }
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
-  const ebayUrl =
+  const soldSearchUrl =
     `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}` +
     `&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`
-	
-	// Flip‑Score Summary counts
+  const activeSearchUrl =
+    `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}`
+  const affiliateSearchUrl = `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=${encodeURIComponent(activeSearchUrl)}`
+
+  // Flip‑Score Summary counts
   const counts = results.reduce(
     (acc, item) => {
       const priceNum = parseFloat(item.price)
       const category =
-        priceNum > 200   ? 'fire'  :
-        priceNum >= 40   ? 'star'  :
-                           'trash'
+        priceNum > 200 ? 'fire' :
+        priceNum >= 40 ? 'star' :
+        'trash'
       acc[category] = (acc[category] || 0) + 1
       return acc
     },
     { trash: 0, star: 0, fire: 0 } as Record<'trash'|'star'|'fire', number>
   )
-
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -72,11 +82,9 @@ export default function SearchForm() {
       </form>
 
       {/* Flip Summary */}
-      <p style={{ marginTop: '1rem', fontSize: '14px', color: '#555' }}>
-        <strong>Flip Summary:</strong> 
-        🔥 {counts.fire} FIRE FLIPS!!, ⭐ {counts.star} Mid..., 🗑️ {counts.trash} Hardly worth it,
+      <p style={{ marginTop: '1rem', fontSize: '16px', color: '#555' }}>
+        <strong>Flip Summary:</strong> 🔥 {counts.fire} fire, ⭐ {counts.star} mid, 🗑️ {counts.trash} trash
       </p>
-
 
       {/* Fire Flips Only */}
       <label style={{ cursor: 'pointer', marginBottom: '1rem' }}>
@@ -118,6 +126,9 @@ export default function SearchForm() {
             {results.map((item, i) => {
               const priceNum = parseFloat(item.price)
               const scoreEmoji = priceNum > 200 ? '🔥' : priceNum >= 40 ? '⭐' : '🗑️'
+              const href = showActive
+                ? `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=${encodeURIComponent(item.link)}`
+                : item.link
 
               return (
                 <li
@@ -141,7 +152,7 @@ export default function SearchForm() {
                   )}
                   <div style={{ flex: 1 }}>
                     <a
-                      href={item.link}
+                      href={href}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{ fontWeight: 600, color: '#0070f3', textDecoration: 'none' }}
@@ -162,7 +173,7 @@ export default function SearchForm() {
 
           {/* See all on eBay */}
           <a
-            href={ebayUrl}
+            href={showActive ? affiliateSearchUrl : soldSearchUrl}
             target="_blank"
             rel="noopener noreferrer"
             style={{ marginTop: '1rem', color: '#0070f3' }}
