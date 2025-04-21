@@ -79,8 +79,8 @@ export async function GET(request: NextRequest) {
     title:    s.title                        || '',
     price:    s.lastSoldPrice?.value        || '',
     currency: s.lastSoldPrice?.currency     || '',
-    image:    s.thumbnailImages?.[0]?.imageUrl
-               ?? s.image?.imageUrl         || '',
+    image:    (s.thumbnailImages?.[0]?.imageUrl
+               ?? s.image?.imageUrl)         || '',
     link:     s.itemWebUrl                   || s.itemHref || '',
     soldDate: s.lastSoldDate                 || '',
   }))
