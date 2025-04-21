@@ -39,6 +39,21 @@ export default function SearchForm() {
   const ebayUrl =
     `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}` +
     `&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`
+	
+	// Flip‑Score Summary counts
+  const counts = results.reduce(
+    (acc, item) => {
+      const priceNum = parseFloat(item.price)
+      const category =
+        priceNum > 200   ? 'fire'  :
+        priceNum >= 40   ? 'star'  :
+                           'trash'
+      acc[category] = (acc[category] || 0) + 1
+      return acc
+    },
+    { trash: 0, star: 0, fire: 0 } as Record<'trash'|'star'|'fire', number>
+  )
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -56,10 +71,12 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* Flip Score Legend */}
+      {/* Flip Summary */}
       <p style={{ marginTop: '1rem', fontSize: '0.9em', color: '#555' }}>
-        <strong>Flip Score:</strong> 🔥 &gt; $200, ⭐ $40–$199.99, 🗑️ ≤ $39.99
+        <strong>Flip Summary:</strong> 
+        🗑️ {counts.trash} trash, ⭐ {counts.star} mid, 🔥 {counts.fire} fire
       </p>
+
 
       {/* Fire Flips Only */}
       <label style={{ cursor: 'pointer', marginBottom: '1rem' }}>
