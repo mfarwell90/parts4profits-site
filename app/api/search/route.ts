@@ -1,23 +1,18 @@
 // app/api/search/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 
-type ItemSummary = {
-  title: string
-  price?: { value?: number; currency?: string }
-  thumbnailImages?: Array<{ imageUrl?: string }>
-  itemWebUrl: string
-  itemEndDate?: string
-}
-
-type BrowseResponse = {
-  itemSummaries?: ItemSummary[]
+type Item = {
+  title:    string
+  price:    string
+  currency: string
+  image?:   string
+  link:     string
+  soldDate: string
 }
 
 export async function GET(request: NextRequest) {
-  // 1) derive your own origin so we can call our token endpoint
-  const origin = new URL(request.url).origin
-
-  // 2) fetch eBay OAuth token from your /api/ebay-token route
+  // 1) fetch OAuth token
+  const origin   = new URL(request.url).origin
   const tokenRes = await fetch(`${origin}/api/ebay-token`)
   if (!tokenRes.ok) {
     const txt = await tokenRes.text()
@@ -28,44 +23,47 @@ export async function GET(request: NextRequest) {
   }
   const { token } = (await tokenRes.json()) as { token: string }
 
-  // 3) pull the year/make/model/details out of the query
-  const url = new URL(request.url)
+  // 2) pull search params
+  const url     = new URL(request.url)
   const year    = url.searchParams.get('year')    ?? ''
   const make    = url.searchParams.get('make')    ?? ''
   const model   = url.searchParams.get('model')   ?? ''
   const details = url.searchParams.get('details') ?? ''
-
   const rawQuery     = `${year} ${make} ${model} ${details}`.trim()
   const encodedQuery = encodeURIComponent(rawQuery)
 
-  // 4) build & call the eBay Browse API
-  const apiUrl = 
-    `https://api.ebay.com/buy/browse/v1/item_summary/search` +
-    `?q=${encodedQuery}&filter=conditions:{USED}&limit=40&sort=END_TIME`
+  // 3) call Marketplace Insights item_sales/search for USED
+  const apiUrl =
+    `https://api.ebay.com/buy/marketplace-insights/v1_beta/item_sales/search` +
+    `?q=${encodedQuery}` +
+    `&filter=conditionId:{3000}` +     // 3000 = USED :contentReference[oaicite:0]{index=0}
+    `&limit=40`
 
   const resp = await fetch(apiUrl, {
     headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type':  'application/json',
+      Authorization:           `Bearer ${token}`,
+      'Content-Type':         'application/json',
+      'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',  // specify US marketplace :contentReference[oaicite:1]{index=1}
     },
   })
   if (!resp.ok) {
     const txt = await resp.text()
     return NextResponse.json(
-      { error: `Browse API failed: ${txt}` },
+      { error: `Marketplace Insights API failed: ${txt}` },
       { status: resp.status }
     )
   }
 
-  // 5) type‐annotate & transform the response
-  const data  = (await resp.json()) as BrowseResponse
-  const items = (data.itemSummaries ?? []).map(item => ({
-    title:    item.title,
-    price:    item.price?.value?.toString() ?? '',
-    currency: item.price?.currency,
-    image:    item.thumbnailImages?.[0]?.imageUrl,
-    link:     item.itemWebUrl,
-    soldDate: item.itemEndDate,
+  // 4) transform the response into your Item shape
+  const json = await resp.json() as any
+  const sales = json.itemSales ?? []
+  const items: Item[] = sales.map((s: any) => ({
+    title:    s.title                         || '',
+    price:    s.lastSoldPrice?.value         || '',
+    currency: s.lastSoldPrice?.currency      || '',
+    image:    s.thumbnailImages?.[0]?.imageUrl || s.image?.imageUrl || '',
+    link:     s.itemWebUrl                   || s.itemHref || '',
+    soldDate: s.lastSoldDate                 || '',
   }))
 
   return NextResponse.json(items)
