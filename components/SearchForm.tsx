@@ -25,19 +25,39 @@ export default function SearchForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
+
     try {
       const qs = new URLSearchParams({ year, make, model, details })
       const endpoint = showActive
         ? `/api/search-active?${qs.toString()}`
         : `/api/search?${qs.toString()}`
+
       const res = await fetch(endpoint)
-      let data: Item[] = await res.json()
+
+      // 1) bail out on a bad response
+      if (!res.ok) {
+        console.error('API error:', await res.text())
+        setResults([])
+        return
+      }
+
+      // 2) parse & validate the JSON is an array
+      const json = await res.json()
+      if (!Array.isArray(json)) {
+        console.error('Unexpected API result (not an array):', json)
+        setResults([])
+        return
+      }
+
+      // 3) data is safe to use now
+      let data: Item[] = json
       if (fireOnly) {
         data = data.filter(it => parseFloat(it.price) > 200)
       }
       setResults(data)
     } catch (err) {
-      console.error('Search failed', err)
+      console.error('Search failed:', err)
+      setResults([])
     } finally {
       setLoading(false)
     }
@@ -49,7 +69,10 @@ export default function SearchForm() {
     `&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`
   const activeSearchUrl =
     `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}`
-  const affiliateSearchUrl = `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=${encodeURIComponent(activeSearchUrl)}`
+  const affiliateSearchUrl = 
+    `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
+    `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
+    `${encodeURIComponent(activeSearchUrl)}`
 
   // Flip‑Score Summary counts
   const counts = results.reduce(
@@ -62,7 +85,7 @@ export default function SearchForm() {
       acc[category] = (acc[category] || 0) + 1
       return acc
     },
-    { trash: 0, star: 0, fire: 0 } as Record<'trash'|'star'|'fire', number>
+    { trash: 0, star: 0, fire: 0 } as Record<'trash' | 'star' | 'fire', number>
   )
 
   return (
@@ -110,10 +133,18 @@ export default function SearchForm() {
 
       {/* Affiliate Disclaimer */}
       {showActive && (
-        <p style={{ fontSize: '0.75rem', color: '#888', maxWidth: '600px', marginBottom: '1rem', textAlign: 'center' }}>
-          Disclaimer: When you click on links to various merchants on this site and make a purchase, this can result in
-          this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay
-          Partner Network.
+        <p
+          style={{
+            fontSize: '0.75rem',
+            color: '#888',
+            maxWidth: '600px',
+            marginBottom: '1rem',
+            textAlign: 'center'
+          }}
+        >
+          Disclaimer: When you click on links to various merchants on this site and make a purchase,
+          this can result in this site earning a commission. Affiliate programs and affiliations
+          include, but are not limited to, the eBay Partner Network.
         </p>
       )}
 
@@ -127,7 +158,7 @@ export default function SearchForm() {
               const priceNum = parseFloat(item.price)
               const scoreEmoji = priceNum > 200 ? '🔥' : priceNum >= 40 ? '⭐' : '🗑️'
               const href = showActive
-                ? `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=${encodeURIComponent(item.link)}`
+                ? affiliateSearchUrl
                 : item.link
 
               return (
