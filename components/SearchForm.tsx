@@ -72,7 +72,7 @@ export default function SearchForm() {
       </form>
 
       {/* Flip Summary */}
-      <p style={{ marginTop: '1rem', fontSize: '0.9em', color: '#555' }}>
+      <p style={{ marginTop: '1rem', fontSize: '14px', color: '#555' }}>
         <strong>Flip Summary:</strong> 
         🔥 {counts.fire} FIRE FLIPS!!, ⭐ {counts.star} Mid..., 🗑️ {counts.trash} Hardly worth it,
       </p>
