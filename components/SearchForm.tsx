@@ -158,11 +158,14 @@ export default function SearchForm() {
               const priceNum = parseFloat(item.price)
               const scoreEmoji = priceNum > 200 ? '🔥' : priceNum >= 40 ? '⭐' : '🗑️'
               const href = showActive
-                ? `https://rover.ebay.com/rover/1/711-53200-19255-0/1`
-                  + `?campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}`
-                  + `&toolid=10001`
-                  + `&mpre=${encodeURIComponent(item.link)}`
+                ? `${item.link}${item.link.includes('?') ? '&' : '?'}`
+                  + 'mkevt=1'
+                  + '&mkcid=1'
+                  + '&mkrid=711-53200-19255-0'
+                  + `&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}`
+                  + '&toolid=10001'
                 : item.link
+
 
 
               return (
