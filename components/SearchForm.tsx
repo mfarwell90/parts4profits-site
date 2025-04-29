@@ -105,12 +105,12 @@ export default function SearchForm() {
       </form>
 
       {/* Flip Summary */}
-      <p style={{ marginTop: '1rem', fontSize: '16px', color: '#555' }}>
-        <strong>Flip Summary:</strong> 🔥 {counts.fire} fire, ⭐ {counts.star} mid, 🗑️ {counts.trash} trash
+      <p style={{ marginTop: '1rem', fontSize: '1.25rem', color: '#555' }}>
+        <strong>Flip Summary:</strong> 🔥 {counts.fire} FIRE FLIPS!!, ⭐ {counts.star} Solid Flip, 🗑️ {counts.trash} Hardly worth the effort.
       </p>
 
       {/* Fire Flips Only */}
-      <label style={{ cursor: 'pointer', marginBottom: '1rem' }}>
+      <label style={{ marginTop: '1rem', cursor: 'pointer', marginBottom: '1rem' }}>
         <input
           type="checkbox"
           checked={fireOnly}
