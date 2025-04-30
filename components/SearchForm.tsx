@@ -21,6 +21,13 @@ export default function SearchForm() {
   const [loading, setLoading] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
+  const [averagePrice, setAveragePrice] = useState<string | null>(null);
+
+  const calculateAverage = (listings: Item[]) => { // <-- Added helper
+    if (!listings.length) return "0.00";
+    const total = listings.reduce((sum, item) => sum + parseFloat(item.price), 0);
+    return (total / listings.length).toFixed(2);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,7 +44,8 @@ export default function SearchForm() {
       // 1) bail out on a bad response
       if (!res.ok) {
         console.error('API error:', await res.text())
-        setResults([])
+        setResults([]);
+		setAveragePrice(null);
         return
       }
 
@@ -45,7 +53,8 @@ export default function SearchForm() {
       const json = await res.json()
       if (!Array.isArray(json)) {
         console.error('Unexpected API result (not an array):', json)
-        setResults([])
+        setResults([]);
+		setAveragePrice(null);
         return
       }
 
@@ -54,10 +63,12 @@ export default function SearchForm() {
       if (fireOnly) {
         data = data.filter(it => parseFloat(it.price) > 200)
       }
-      setResults(data)
+      setResults(data);
+	  setAveragePrice(showActive ? null : calculateAverage(data));
     } catch (err) {
       console.error('Search failed:', err)
       setResults([])
+	  setAveragePrice(null);
     } finally {
       setLoading(false)
     }
@@ -103,6 +114,13 @@ export default function SearchForm() {
           {loading ? 'Searching…' : 'Search'}
         </button>
       </form>
+	  
+	  {/* Average Sold Price Display (ADDED) */}
+      {averagePrice && (
+        <div style={{ marginTop: '1rem', padding: '0.5rem 1rem', backgroundColor: '#f7f7f7', borderRadius: '8px', textAlign: 'center', fontSize: '1.2rem', fontWeight: 'bold' }}>
+          📈 Average Sold Price: ${averagePrice}
+        </div>
+      )}
 
       {/* Flip Summary */}
       <p style={{ marginTop: '1rem', fontSize: '1.25rem', color: '#555' }}>
