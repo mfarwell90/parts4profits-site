@@ -139,14 +139,14 @@ export default function SearchForm() {
       </label>
 
       {/* Toggle for Active Listings */}
-      <label style={{ cursor: 'pointer', marginBottom: '0.5rem' }}>
+      <label style={{ cursor: 'pointer', marginBottom: '1rem' }}>
         <input
           type="checkbox"
           checked={showActive}
           onChange={() => setShowActive(!showActive)}
           style={{ marginRight: '0.5rem' }}
         />
-        Show Active Listings (via eBay Partner Network)
+        NEED PARTS FOR YOUR RIDE?! SELECT TO SHOW ACTIVE LISTINGS!! (via eBay Partner Network)
       </label>
 
       {/* Affiliate Disclaimer */}
