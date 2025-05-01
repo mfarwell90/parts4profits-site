@@ -123,9 +123,21 @@ export default function SearchForm() {
       )}
 
       {/* Flip Summary */}
-      <p style={{ marginTop: '1rem', fontSize: '1.25rem', color: '#555' }}>
-        <strong>Flip Summary:</strong> 🔥 {counts.fire} FIRE FLIPS!!, ⭐ {counts.star} Solid Flip, 🗑️ {counts.trash} Hardly worth the effort.
-      </p>
+      <div style={{
+        marginTop: '1rem',
+        padding: '0.75rem 1.25rem',
+        backgroundColor: '#f0f0f0',
+        borderRadius: '8px',
+        textAlign: 'center',
+        lineHeight: '1.5',
+        fontSize: '1.1rem',
+      }}>
+        <strong style={{ fontSize: '1.2rem' }}>Flip Score:</strong><br />
+        🔥 Fire Flips: {counts.fire}<br />
+        ⭐ Solid Flips: {counts.star}<br />
+        🗑️ Hardly Worth It: {counts.trash}
+      </div>
+
 
       {/* Fire Flips Only */}
       <label style={{ marginTop: '1rem', cursor: 'pointer', marginBottom: '1rem' }}>
