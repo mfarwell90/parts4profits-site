@@ -19,7 +19,7 @@ function getFlipTier(priceNum: number): FlipTier {
   if (priceNum <= 75) return 'ThumbsUp'
   if (priceNum <= 150) return 'Check'
   if (priceNum <= 300) return 'Star'
-  return 'Fire' // 300+
+  return 'Fire'
 }
 
 function tierEmoji(tier: FlipTier) {
@@ -41,9 +41,10 @@ export default function SearchForm() {
   const [results, setResults] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
 
+  // all unchecked by default
+  const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
-  const [sortHigh, setSortHigh] = useState(false)
 
   const [averagePrice, setAveragePrice] = useState<string | null>(null)
 
@@ -71,7 +72,7 @@ export default function SearchForm() {
 
       const json = await res.json()
       if (!Array.isArray(json)) {
-        console.error('Unexpected API result (not an array):', json)
+        console.error('Unexpected API result:', json)
         setResults([])
         setAveragePrice(null)
         return
@@ -119,7 +120,11 @@ export default function SearchForm() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      {/* Search Form */}
+      {/* legend above the search, emoji only */}
+      <div style={{ marginBottom: '0.5rem', fontSize: '0.95rem', color: 'var(--text)', textAlign: 'center' }}>
+        🔥 $300+   •   ⭐ $151 - $300   •   ✔️ $76 - $150   •   👍 $16 - $75   •   🗑️ &lt;$15               
+      </div>
+
       <form
         onSubmit={handleSubmit}
         style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}
@@ -133,28 +138,8 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* Controls */}
-      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
-        <label style={{ cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={fireOnly}
-            onChange={e => setFireOnly(e.target.checked)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Show Fire Flips Only 🔥 (≥ $300)
-        </label>
-
-        <label style={{ cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={showActive}
-            onChange={() => setShowActive(!showActive)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Show Active Listings (via eBay Partner Network)
-        </label>
-
+      {/* centered controls, ordered as requested */}
+      <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <label style={{ cursor: 'pointer' }}>
           <input
             type="checkbox"
@@ -164,15 +149,28 @@ export default function SearchForm() {
           />
           Sort by Highest Price
         </label>
+
+        <label style={{ cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={fireOnly}
+            onChange={e => setFireOnly(e.target.checked)}
+            style={{ marginRight: '0.5rem' }}
+          />
+          Show Fire Flips
+        </label>
+
+        <label style={{ cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={showActive}
+            onChange={() => setShowActive(!showActive)}
+            style={{ marginRight: '0.5rem' }}
+          />
+          Show Active Listings
+        </label>
       </div>
 
-      {/* Legend */}
-      <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: 'var(--text)', textAlign: 'center' }}>
-        {tierEmoji('Trash')} Trash under 15, {tierEmoji('ThumbsUp')} ThumbsUp 16 to 75, {tierEmoji('Check')} Check 76 to 150,
-        {tierEmoji('Star')} Star 151 to 300, {tierEmoji('Fire')} Fire 300 plus
-      </div>
-
-      {/* Average Sold Price */}
       {!showActive && averagePrice && (
         <div
           style={{
@@ -189,7 +187,7 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* Summary Counts */}
+      {/* totals with emoji only */}
       {!showActive && (
         <div
           style={{
@@ -202,12 +200,10 @@ export default function SearchForm() {
             fontSize: '1.05rem'
           }}
         >
-          <strong style={{ fontSize: '1.1rem' }}>Flip Score:</strong><br />
-          🔥 Fire: {counts.Fire} &nbsp;·&nbsp; ⭐ Star: {counts.Star} &nbsp;·&nbsp; ✔️ Check: {counts.Check} &nbsp;·&nbsp; 👍 ThumbsUp: {counts.ThumbsUp} &nbsp;·&nbsp; 🗑️ Trash: {counts.Trash}
+          🔥 {counts.Fire}  •  ⭐ {counts.Star}  •  ✔️ {counts.Check}  •  👍 {counts.ThumbsUp}  •  🗑️ {counts.Trash}
         </div>
       )}
 
-      {/* Results */}
       {loading && <p>Loading results…</p>}
 
       {results.length > 0 && (
@@ -216,7 +212,6 @@ export default function SearchForm() {
             {results.map((item, i) => {
               const priceNum = parseFloat(item.price) || 0
               const tier = getFlipTier(priceNum)
-              const scoreEmoji = tierEmoji(tier)
               const href = showActive
                 ? `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
                 : item.link
@@ -254,8 +249,8 @@ export default function SearchForm() {
                     <div style={{ marginTop: '0.25rem', color: 'var(--text)' }}>
                       {item.currency} {item.price}
                     </div>
-                    <div style={{ marginTop: '0.25rem', fontSize: '0.9em', color: 'var(--text)' }}>
-                      <strong>Flip Score:</strong> {scoreEmoji} {tier}
+                    <div style={{ marginTop: '0.25rem', fontSize: '1rem' }}>
+                      {tierEmoji(tier)}
                     </div>
                   </div>
                 </li>
@@ -263,7 +258,6 @@ export default function SearchForm() {
             })}
           </ul>
 
-          {/* See all on eBay */}
           <a
             href={showActive ? affiliateSearchUrl : soldSearchUrl}
             target="_blank"
