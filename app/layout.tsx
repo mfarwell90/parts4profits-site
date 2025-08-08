@@ -21,37 +21,39 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body style={{ margin: 0, fontFamily: 'var(--font-inter)' }}>
+      <head>
+        <meta name="color-scheme" content="light dark" />
+      </head>
+      <body style={{ margin: 0, fontFamily: 'var(--font-inter)', background: 'var(--bg)', color: 'var(--text)' }}>
         <header
           style={{
             padding: '1rem 0',
             textAlign: 'center',
-            background: '#fafafa',
+            background: 'var(--card)',
+            borderBottom: '1px solid var(--border)',
           }}
         >
-          {/* Existing Banner Image */}
           <img
             src="/wmbanner.png"
             alt="Wrench Master Flip Finder"
-            style={{ 
-              maxWidth: '1200px', 
+            style={{
+              maxWidth: '100%',
+              width: '480px',
               height: 'auto',
-              width: '40%',
               objectFit: 'cover',
               margin: '0 auto',
+              display: 'block',
             }}
           />
 
-          {/* 🔥 Add Navigation Links Right Here 🔥 */}
           <nav style={{ marginTop: '1rem', fontSize: '1rem' }}>
-            <Link href="/" style={{ margin: '0 0.5rem', color: '#0070f3', textDecoration: 'underline' }}>
+            <Link href="/" style={{ margin: '0 0.5rem', color: 'var(--link)', textDecoration: 'underline' }}>
               Home
             </Link>
-            <span>·</span>
-            <Link href="/profit-calculator" style={{ margin: '0 0.5rem', color: '#0070f3', textDecoration: 'underline' }}>
+            <span style={{ color: 'var(--text)' }}>·</span>
+            <Link href="/profit-calculator" style={{ margin: '0 0.5rem', color: 'var(--link)', textDecoration: 'underline' }}>
               Profit Calculator
             </Link>
-            {/* Add future links here */}
           </nav>
         </header>
 
@@ -62,10 +64,11 @@ export default function RootLayout({
         <footer
           style={{
             padding: '1rem',
-            borderTop: '1px solid #eee',
+            borderTop: '1px solid var(--border)',
             textAlign: 'center',
             fontSize: '0.9em',
-            color: '#666',
+            color: 'var(--text)',
+            background: 'var(--card)',
           }}
         >
           © {new Date().getFullYear()} Parts4Profits
