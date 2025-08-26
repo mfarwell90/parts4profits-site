@@ -1,4 +1,4 @@
-import { load } from 'cheerio'
+import { load, Cheerio, Element } from 'cheerio'
 
 export type Item = {
   title:    string
@@ -10,53 +10,49 @@ export type Item = {
 }
 
 export function parseEbayHtml(html: string): Item[] {
-  // 1) JSON fragments in several shapes
+  // Pass 1: JSON fragments
   const jsonItems = extractFromJsonFragments(html)
   if (jsonItems.length) return dedupe(jsonItems)
 
-  // 2) Robust href extraction for sold pages (multiple URL patterns)
-  const hrefItems = extractFromHrefPatterns(html)
-  if (hrefItems.length) return dedupe(hrefItems)
+  // Pass 2: DOM-aware extraction from actual result <li> blocks
+  const domItems = extractFromDom(html)
+  if (domItems.length) return dedupe(domItems)
 
-  // 3) Cheerio sweep across anchors if classes changed completely
-  const cheerioItems = extractWithCheerioAnchors(html)
-  return dedupe(cheerioItems)
+  // Pass 3: href fallback if the DOM structure changes again
+  const hrefItems = extractFromHrefFallback(html)
+  return dedupe(hrefItems)
 }
 
-/* ---------- helpers ---------- */
+/* ---------- PASS 1: JSON blobs ---------- */
 
 function extractFromJsonFragments(html: string): Item[] {
   const out: Item[] = []
 
-  // Common SRP blob (quoted itemId)
   const reA =
-    /"itemId":"(\d{12})".{0,700}?"title":"(.*?)".{0,700}?"viewItemURL":"(https:[^"]+)"/g
+    /"itemId":"?(\d{12})"?[^]*?"title":"(.*?)"[^]*?"viewItemURL":"(https:[^"]+)"/g
   for (const m of html.matchAll(reA)) {
     const title = safeUnescape(m[2])
-    const link = m[3].replace(/\\u002F/g, '/')
-    const { price, currency } = fallbackPriceNear(html, m.index ?? 0)
-    out.push({ title, price, currency, link })
+    const link  = m[3].replace(/\\u002F/g, '/')
+    const priced = fallbackPriceNear(html, m.index ?? 0)
+    const image  = findImageNear(html, m.index ?? 0)
+
+    out.push({
+      title,
+      price: priced.price,
+      currency: priced.currency,
+      image,
+      link,
+      soldDate: undefined,
+    })
   }
 
-  // Variant where itemId is unquoted
+  // If not found, try price as string form
   if (!out.length) {
     const reB =
-      /"itemId":\s*(\d{12}).{0,700}?"title":"(.*?)".{0,700}?"viewItemURL":"(https:[^"]+)"/g
+      /"itemId":"?(\d{12})"?[^]*?"title":"(.*?)"[^]*?"viewItemURL":"(https:[^"]+)"[^]*?"price":"([^"]+)"/g
     for (const m of html.matchAll(reB)) {
       const title = safeUnescape(m[2])
-      const link = m[3].replace(/\\u002F/g, '/')
-      const { price, currency } = fallbackPriceNear(html, m.index ?? 0)
-      out.push({ title, price, currency, link })
-    }
-  }
-
-  // Price sometimes appears as "price":"US $79.99"
-  if (!out.length) {
-    const reC =
-      /"itemId":"?(\d{12})"?[^]*?"title":"(.*?)"[^]*?"viewItemURL":"(https:[^"]+)"[^]*?"price":"([^"]+)"/g
-    for (const m of html.matchAll(reC)) {
-      const title = safeUnescape(m[2])
-      const link = m[3].replace(/\\u002F/g, '/')
+      const link  = m[3].replace(/\\u002F/g, '/')
       const priced = splitPrice(safeUnescape(m[4]))
       out.push({ title, price: priced.price, currency: priced.currency, link })
     }
@@ -65,75 +61,102 @@ function extractFromJsonFragments(html: string): Item[] {
   return out
 }
 
-function extractFromHrefPatterns(html: string): Item[] {
-  const out: Item[] = []
-  const ids = new Set<string>()
+/* ---------- PASS 2: DOM list items ---------- */
 
-  // /itm/.../123456789012 and /itm/123456789012
-  const re1 = /\/itm\/[^"'>]*?\/(\d{12})(?:[?"'\/]|)/g
-  const re2 = /\/itm\/(\d{12})(?:[?"'\/]|)/g
-  const re3 = /https:\\\/\\\/www\.ebay\.com\\\/itm\\\/(\d{12})/g // escaped JSON hrefs
-
-  for (const r of [re1, re2, re3]) {
-    for (const m of html.matchAll(r)) ids.add(m[1])
-  }
-
-  for (const id of ids) {
-    const idx = html.indexOf(id)
-    const window = html.slice(Math.max(0, idx - 1200), idx + 2000)
-
-    // Try nearby title
-    const t =
-      window.match(/"title":"(.*?)"/) ||
-      window.match(/<h3[^>]*class="[^"]*s-item__title[^"]*"[^>]*>(.*?)<\/h3>/i)
-    const title = t ? safeUnescape(stripTags(t[1]).trim()) : `Item ${id}`
-
-    // Try nearby price
-    const priced = fallbackPriceNear(html, idx)
-
-    const link = `https://www.ebay.com/itm/${id}`
-    out.push({ title, price: priced.price, currency: priced.currency, link })
-  }
-
-  return out
-}
-
-function extractWithCheerioAnchors(html: string): Item[] {
+function extractFromDom(html: string): Item[] {
   const $ = load(html)
   const items: Item[] = []
-  const seen = new Set<string>()
 
-  $('a[href*="/itm/"]').each((_, el) => {
-    const href = $(el).attr('href') || ''
-    const m = href.match(/\/itm\/(\d{12})(?:[?"'\/]|)/)
-    if (!m) return
-    const id = m[1]
-    if (seen.has(id)) return
-    seen.add(id)
+  // Target generic list items that contain an /itm/ link
+  $('li:has(a[href*="/itm/"]), .s-item:has(a[href*="/itm/"])').each((_, el) => {
+    const $el = $(el as Element)
 
-    const link = href.startsWith('http') ? href : `https://www.ebay.com/itm/${id}`
+    const $a = $el.find('a[href*="/itm/"]').first()
+    const href = $a.attr('href') || ''
+    const idMatch = href.match(/\/itm\/(\d{12})(?:[?"'\/]|)/)
+    if (!idMatch) return
 
-    // Title: anchor text or nearest heading
-    const anchorText = $(el).text().trim()
+    const link = href.startsWith('http') ? href : `https://www.ebay.com/itm/${idMatch[1]}`
+
+    // Title candidates in order
     const title =
-      anchorText ||
-      $(el).closest('li').find('h3').first().text().trim() ||
-      `Item ${id}`
+      textClean(
+        $el.find('h3.s-item__title').first().text() ||
+        $el.find('[role="heading"]').first().text() ||
+        $a.text()
+      ) ||
+      // sometimes the alt text holds a good title
+      textClean($el.find('img').first().attr('alt') || '') ||
+      `Item ${idMatch[1]}`
 
-    // We do not have a DOM context for prices reliably; pull from HTML near id
-    const idx = html.indexOf(id)
-    const priced = fallbackPriceNear(html, idx)
+    // Price candidates in order
+    const priceText =
+      textClean(
+        $el.find('.s-item__price').first().text() ||
+        $el.find('[data-testid="srp-list-item-price"]').first().text() ||
+        // grab any $… looking text in this block
+        $el.text().match(/\$[\d.,]+/)?.[0] || ''
+      )
+    const { price, currency } = splitPrice(priceText)
 
-    items.push({ title, price: priced.price, currency: priced.currency, link })
+    // Image
+    const image =
+      $el.find('.s-item__image-img').attr('src') ||
+      $el.find('.s-item__image-img').attr('data-src') ||
+      $el.find('img').first().attr('src') ||
+      undefined
+
+    // Sold date variants
+    const soldDate =
+      textClean($el.find('.s-item__title--tagblock .POSITIVE').text()) ||
+      textClean($el.find('.s-item__ended-date').text()) ||
+      undefined
+
+    items.push({ title, price, currency, image, link, soldDate })
   })
 
   return items
 }
 
+/* ---------- PASS 3: href fallback only ---------- */
+
+function extractFromHrefFallback(html: string): Item[] {
+  const out: Item[] = []
+  const ids = new Set<string>()
+
+  for (const r of [
+    /\/itm\/[^"'>]*?\/(\d{12})(?:[?"'\/]|)/g,
+    /\/itm\/(\d{12})(?:[?"'\/]|)/g,
+    /https:\\\/\\\/www\.ebay\.com\\\/itm\\\/(\d{12})/g,
+  ]) {
+    for (const m of html.matchAll(r)) ids.add(m[1])
+  }
+
+  for (const id of ids) {
+    const idx = html.indexOf(id)
+    const around = html.slice(Math.max(0, idx - 1500), idx + 2500)
+
+    const title =
+      safeUnescape(
+        (around.match(/"title":"(.*?)"/)?.[1] || '').trim()
+      ) || `Item ${id}`
+
+    const priced = fallbackPriceNear(html, idx)
+    const link = `https://www.ebay.com/itm/${id}`
+
+    out.push({ title, price: priced.price, currency: priced.currency, link })
+  }
+  return out
+}
+
 /* ---------- utilities ---------- */
 
+function textClean(s: string) {
+  return s.replace(/\s+/g, ' ').trim()
+}
+
 function splitPrice(text: string): { price: string; currency: string } {
-  // "US $79.99", "$79.99", "GBP 12.50"
+  // Examples: "US $79.99", "$79.99", "GBP 12.50"
   const m = text.match(/^\s*([A-Z]{2,3}|US)?\s*\$?\s*([\d.,]+)/i)
   const currency = m?.[1] && m[1].toUpperCase() !== 'US' ? m[1].toUpperCase() : '$'
   const price = m?.[2] ? m[2].replace(/,/g, '') : ''
@@ -154,12 +177,14 @@ function fallbackPriceNear(html: string, fromIndex: number): { price: string; cu
   return { price: '', currency: '' }
 }
 
-function safeUnescape(s: string) {
-  try { return JSON.parse(`"${s.replace(/"/g, '\\"')}"`) } catch { return s }
+function findImageNear(html: string, fromIndex: number): string | undefined {
+  const win = html.slice(Math.max(0, fromIndex - 1500), fromIndex + 2500)
+  const m = win.match(/"galleryURL":"(https:[^"]+)"/)
+  return m ? m[1].replace(/\\u002F/g, '/') : undefined
 }
 
-function stripTags(s: string) {
-  return s.replace(/<[^>]+>/g, '')
+function safeUnescape(s: string) {
+  try { return JSON.parse(`"${s.replace(/"/g, '\\"')}"`) } catch { return s }
 }
 
 function dedupe(items: Item[]) {
