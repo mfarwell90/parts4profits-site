@@ -1,4 +1,3 @@
-// app/api/search/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { parseEbayHtml } from '../../../lib/ebayParser'
 
@@ -23,7 +22,7 @@ export async function GET(request: NextRequest) {
     const rawQuery = `${year} ${make} ${model} ${details}`.trim()
     const q = encodeURIComponent(rawQuery)
 
-    // Sold + Completed + Used, stable params
+    // Sold + Completed + Used, plus stability params
     const htmlUrl =
       `https://www.ebay.com/sch/i.html?_nkw=${q}` +
       `&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000&_sop=10&rt=nc`
