@@ -73,7 +73,6 @@ export async function GET(request: NextRequest) {
 async function hydrateMissing(items: Item[]): Promise<Item[]> {
   if (!Array.isArray(items) || items.length === 0) return items
 
-  // find rows with missing title or price
   const needs = items
     .map((it, i) => ({ it, i }))
     .filter(x => !x.it?.title || !x.it?.price)
@@ -131,13 +130,10 @@ function extractFromItemPage(html: string): Patch {
   const tTag  = get(/<title>([^<]+)<\/title>/i).replace(/\s*\|\s*eBay.*$/i, '')
   const title = tOg || tTw || tTag || ''
 
-  // price candidates
+  // price candidates (currency captured when available; unused vars removed)
   const pA = get(/"priceValue"\s*:\s*{\s*"value"\s*:\s*([\d.]+)/i)
-  const cA = get(/"priceValue"\s*:\s*{[^}]*"currency"\s*:\s*"([A-Z]{3})"/i)
   const pB = get(/"currentPrice"\s*:\s*{\s*"value"\s*:\s*([\d.]+)/i)
-  const cB = get(/"currentPrice"\s*:\s*{[^}]*"currency"\s*:\s*"([A-Z]{3})"/i)
   const pC = get(/"price"\s*:\s*"([^"]+)"/i) // display string like US $79.99
-
   const priceStr = pA || pB || pC || get(/\$([\d.,]{2,})/)
   const priced = splitPrice(pC || priceStr)
 
