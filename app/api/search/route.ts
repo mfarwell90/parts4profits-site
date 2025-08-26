@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     const year    = url.searchParams.get('year')    ?? ''
     const make    = url.searchParams.get('make')    ?? ''
     const model   = url.searchParams.get('model')   ?? ''
-    const details = url.searchParams.get('details') ?? ''  // ensure your client sends "details"
+    const details = url.searchParams.get('details') ?? ''
     const debug   = url.searchParams.get('debug') === '1'
 
     if (!year || !make || !model) {
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
     const rawQuery = `${year} ${make} ${model} ${details}`.trim()
     const q = encodeURIComponent(rawQuery)
 
-    // Make the Sold + Used URL explicit and stable
+    // Sold + Completed + Used, stable params
     const htmlUrl =
       `https://www.ebay.com/sch/i.html?_nkw=${q}` +
       `&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000&_sop=10&rt=nc`
@@ -37,8 +37,6 @@ export async function GET(request: NextRequest) {
     })
 
     const html = await resp.text()
-
-    // Basic sanity for bot-wall or weird variant pages
     const mentionsCaptcha = /captcha|enable javascript|access denied|automated access/i.test(html)
     const bytes = html.length
 
@@ -63,7 +61,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json(items)
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'unknown' }, { status: 500 })
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'unknown'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
