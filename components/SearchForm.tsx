@@ -1,3 +1,4 @@
+// app/components/SearchForm.tsx
 'use client'
 
 import { useState } from 'react'
@@ -45,8 +46,8 @@ export default function SearchForm() {
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
 
-  // new single checkbox (already wired server-side)
-  const [junkyard, setJunkyard] = useState(false) // $100–$400
+  // new single checkbox (server enforces $100–$400)
+  const [junkyard, setJunkyard] = useState(false)
 
   const [averagePrice, setAveragePrice] = useState<string | null>(null)
 
@@ -62,7 +63,7 @@ export default function SearchForm() {
 
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '50') // DEFAULT 50 results
+      qs.set('limit', '50') // default 50 results
 
       if (junkyard) qs.set('junkyard', '1')
 
@@ -129,6 +130,17 @@ export default function SearchForm() {
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
     `${encodeURIComponent(activeSearchUrl)}`
 
+  // flip counts (for SOLD view only)
+  const counts = results.reduce(
+    (acc, item) => {
+      const priceNum = parseFloat(item.price) || 0
+      const tier = getFlipTier(priceNum)
+      acc[tier] = (acc[tier] || 0) + 1
+      return acc
+    },
+    { Trash: 0, ThumbsUp: 0, Check: 0, Star: 0, Fire: 0 } as Record<FlipTier, number>
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       {/* legend above the search, emoji only */}
@@ -192,6 +204,7 @@ export default function SearchForm() {
         </label>
       </div>
 
+      {/* SOLD VIEW: average price + FLIP COUNTER */}
       {!showActive && averagePrice && (
         <div
           style={{
@@ -208,21 +221,39 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* DISCLAIMER replaces the flip counter panel */}
-      <div
-        style={{
-          marginTop: '0.75rem',
-          padding: '0.75rem 1.25rem',
-          backgroundColor: 'var(--muted)',
-          borderRadius: '8px',
-          textAlign: 'center',
-          lineHeight: 1.5,
-          fontSize: '0.95rem'
-        }}
-      >
-        <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
-        result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
-      </div>
+      {!showActive && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem 1.25rem',
+            backgroundColor: 'var(--muted)',
+            borderRadius: '8px',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            fontSize: '1.05rem'
+          }}
+        >
+          🔥 {counts.Fire}  •  ⭐ {counts.Star}  •  ✔️ {counts.Check}  •  👍 {counts.ThumbsUp}  •  🗑️ {counts.Trash}
+        </div>
+      )}
+
+      {/* ACTIVE VIEW: show the DISCLAIMER instead of flip counter */}
+      {showActive && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem 1.25rem',
+            backgroundColor: 'var(--muted)',
+            borderRadius: '8px',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            fontSize: '0.95rem'
+          }}
+        >
+          <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
+          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
+        </div>
+      )}
 
       {loading && <p>Loading results…</p>}
 
