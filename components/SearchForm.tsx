@@ -1,7 +1,7 @@
 // app/components/SearchForm.tsx
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 type Item = {
   title: string
@@ -32,30 +32,66 @@ function tierEmoji(tier: FlipTier) {
   }
 }
 
+const priceNum = (p?: string) => {
+  const n = parseFloat(p || '')
+  return Number.isFinite(n) ? n : 0
+}
+
 export default function SearchForm() {
   const [year, setYear] = useState('')
   const [make, setMake] = useState('')
   const [model, setModel] = useState('')
   const [details, setDetails] = useState('')
 
+  // raw vs displayed results
+  const [rawResults, setRawResults] = useState<Item[]>([])
   const [results, setResults] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
 
-  // existing toggles
+  // toggles
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
+  const [junkyard, setJunkyard] = useState(false) // $100–$400
 
-  // new single checkbox (server enforces $100–$400)
-  const [junkyard, setJunkyard] = useState(false)
+  const haveSearched = rawResults.length > 0
 
-  const [averagePrice, setAveragePrice] = useState<string | null>(null)
+  // derive displayed results from raw + toggles (no submit needed)
+  const derivedResults = useMemo(() => {
+    let list = [...rawResults]
 
-  const calculateAverage = (listings: Item[]) => {
-    if (!listings.length) return '0.00'
-    const total = listings.reduce((sum, item) => sum + parseFloat(item.price), 0)
-    return (total / listings.length).toFixed(2)
-  }
+    // client-side Junkyard Specialties band
+    if (!showActive && junkyard) {
+      list = list.filter(it => {
+        const n = priceNum(it.price)
+        return n >= 100 && n <= 400
+      })
+    }
+
+    // Fire flips
+    if (fireOnly) {
+      list = list.filter(it => priceNum(it.price) >= 300)
+    }
+
+    // Sort by Highest
+    if (sortHigh) {
+      list.sort((a, b) => priceNum(b.price) - priceNum(a.price))
+    }
+
+    return list
+  }, [rawResults, junkyard, fireOnly, sortHigh, showActive])
+
+  // keep state in sync
+  useEffect(() => {
+    setResults(derivedResults)
+  }, [derivedResults])
+
+  // average for SOLD view, computed off displayed items
+  const averagePrice = useMemo(() => {
+    if (showActive || results.length === 0) return null
+    const total = results.reduce((sum, item) => sum + priceNum(item.price), 0)
+    return (total / results.length).toFixed(2)
+  }, [results, showActive])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -65,41 +101,23 @@ export default function SearchForm() {
       const qs = new URLSearchParams({ year, make, model, details })
       qs.set('limit', '50') // default 50 results
 
+      // NOTE: we still include junkyard on first fetch if it's already checked,
+      // but after that the checkbox works client-side without another fetch.
       if (junkyard) qs.set('junkyard', '1')
 
       const endpoint = showActive ? `/api/search-active?${qs.toString()}` : `/api/search?${qs.toString()}`
       const res = await fetch(endpoint)
-      if (!res.ok) {
-        console.error('API error:', await res.text())
-        setResults([])
-        setAveragePrice(null)
-        return
-      }
+      if (!res.ok) throw new Error(await res.text())
 
       const json = await res.json()
-      if (!Array.isArray(json)) {
-        console.error('Unexpected API result:', json)
-        setResults([])
-        setAveragePrice(null)
-        return
-      }
+      if (!Array.isArray(json)) throw new Error('Unexpected API result')
 
-      let data: Item[] = json
-
-      if (fireOnly) {
-        data = data.filter(it => (parseFloat(it.price) || 0) >= 300)
-      }
-
-      if (sortHigh) {
-        data = [...data].sort((a, b) => (parseFloat(b.price) || 0) - (parseFloat(a.price) || 0))
-      }
-
-      setResults(data)
-      setAveragePrice(showActive ? null : calculateAverage(data))
+      setRawResults(json)         // keep the original set
+      // setResults happens via useEffect(derivedResults)
     } catch (err) {
       console.error('Search failed:', err)
+      setRawResults([])
       setResults([])
-      setAveragePrice(null)
     } finally {
       setLoading(false)
     }
@@ -107,7 +125,7 @@ export default function SearchForm() {
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // *** ANCHORED TO PARTS & ACCESSORIES (6028) ***
+  // *** ANCHORED TO PARTS & ACCESSORIES (6028) for consistency with server ***
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000',
@@ -130,11 +148,10 @@ export default function SearchForm() {
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
     `${encodeURIComponent(activeSearchUrl)}`
 
-  // flip counts (for SOLD view only)
+  // flip counts from the displayed SOLD results
   const counts = results.reduce(
     (acc, item) => {
-      const priceNum = parseFloat(item.price) || 0
-      const tier = getFlipTier(priceNum)
+      const tier = getFlipTier(priceNum(item.price))
       acc[tier] = (acc[tier] || 0) + 1
       return acc
     },
@@ -161,28 +178,8 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* centered controls */}
+      {/* Controls: Show Active is always visible; other filters appear after first search */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
-        <label style={{ cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={sortHigh}
-            onChange={() => setSortHigh(!sortHigh)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Sort by Highest Price
-        </label>
-
-        <label style={{ cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={fireOnly}
-            onChange={e => setFireOnly(e.target.checked)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Show Fire Flips
-        </label>
-
         <label style={{ cursor: 'pointer' }}>
           <input
             type="checkbox"
@@ -193,18 +190,42 @@ export default function SearchForm() {
           Show Active Listings
         </label>
 
-        <label style={{ cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={junkyard}
-            onChange={e => setJunkyard(e.target.checked)}
-            style={{ marginRight: '0.5rem' }}
-          />
-          Junkyard Specialties $100–$400
-        </label>
+        {haveSearched && (
+          <>
+            <label style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={sortHigh}
+                onChange={() => setSortHigh(!sortHigh)}
+                style={{ marginRight: '0.5rem' }}
+              />
+              Sort by Highest Price
+            </label>
+
+            <label style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={fireOnly}
+                onChange={e => setFireOnly(e.target.checked)}
+                style={{ marginRight: '0.5rem' }}
+              />
+              Show Fire Flips
+            </label>
+
+            <label style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={junkyard}
+                onChange={e => setJunkyard(e.target.checked)}
+                style={{ marginRight: '0.5rem' }}
+              />
+              Junkyard Specialties $100–$400
+            </label>
+          </>
+        )}
       </div>
 
-      {/* SOLD VIEW: average price + FLIP COUNTER */}
+      {/* SOLD VIEW: average + counter; ACTIVE VIEW: disclaimer */}
       {!showActive && averagePrice && (
         <div
           style={{
@@ -221,7 +242,7 @@ export default function SearchForm() {
         </div>
       )}
 
-      {!showActive && (
+      {!showActive && haveSearched && (
         <div
           style={{
             marginTop: '0.75rem',
@@ -237,8 +258,7 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* ACTIVE VIEW: show the DISCLAIMER instead of flip counter */}
-      {showActive && (
+      {showActive && haveSearched && (
         <div
           style={{
             marginTop: '0.75rem',
@@ -261,8 +281,7 @@ export default function SearchForm() {
         <>
           <ul style={{ listStyle: 'none', padding: 0, width: '90%', maxWidth: '700px' }}>
             {results.map((item, i) => {
-              const priceNum = parseFloat(item.price) || 0
-              const tier = getFlipTier(priceNum)
+              const tier = getFlipTier(priceNum(item.price))
               const href = showActive
                 ? `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
                 : item.link
