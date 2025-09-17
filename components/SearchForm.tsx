@@ -46,6 +46,9 @@ export default function SearchForm() {
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
 
+  // new single checkbox
+  const [junkyard, setJunkyard] = useState(false) // $100–$400
+
   const [averagePrice, setAveragePrice] = useState<string | null>(null)
 
   const calculateAverage = (listings: Item[]) => {
@@ -60,6 +63,10 @@ export default function SearchForm() {
 
     try {
       const qs = new URLSearchParams({ year, make, model, details })
+      qs.set('limit', '30') // default 30 results with images
+
+      if (junkyard) qs.set('junkyard', '1')
+
       const endpoint = showActive ? `/api/search-active?${qs.toString()}` : `/api/search?${qs.toString()}`
 
       const res = await fetch(endpoint)
@@ -100,9 +107,25 @@ export default function SearchForm() {
   }
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
-  const soldSearchUrl =
-    `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`
-  const activeSearchUrl = `https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(rawQuery)}`
+
+  // Build the eBay URLs for the "See all results" link
+  const soldParams = new URLSearchParams({
+    _nkw: rawQuery,
+    sacat: '6028',
+    _dcat: '6028',
+    LH_ItemCondition: '3000',
+    LH_Sold: '1',
+    LH_Complete: '1'
+  })
+  if (junkyard) {
+    soldParams.set('_udlo', '100')
+    soldParams.set('_udhi', '400')
+  }
+  const soldSearchUrl = `https://www.ebay.com/sch/i.html?${soldParams.toString()}`
+
+  const activeParams = new URLSearchParams({ _nkw: rawQuery })
+  const activeSearchUrl = `https://www.ebay.com/sch/i.html?${activeParams.toString()}`
+
   const affiliateSearchUrl =
     `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
@@ -122,7 +145,7 @@ export default function SearchForm() {
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       {/* legend above the search, emoji only */}
       <div style={{ marginBottom: '0.5rem', fontSize: '0.95rem', color: 'var(--text)', textAlign: 'center' }}>
-        🔥 $300+   •   ⭐ $151 - $300   •   ✔️ $76 - $150   •   👍 $16 - $75   •   🗑️ &lt;$15               
+        🔥 $300+   •   ⭐ $151 - $300   •   ✔️ $76 - $150   •   👍 $16 - $75   •   🗑️ &lt;$15
       </div>
 
       <form
@@ -138,7 +161,7 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* centered controls, ordered as requested */}
+      {/* centered controls */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <label style={{ cursor: 'pointer' }}>
           <input
@@ -168,6 +191,16 @@ export default function SearchForm() {
             style={{ marginRight: '0.5rem' }}
           />
           Show Active Listings
+        </label>
+
+        <label style={{ cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={junkyard}
+            onChange={e => setJunkyard(e.target.checked)}
+            style={{ marginRight: '0.5rem' }}
+          />
+          Junkyard Specialties $100–$400
         </label>
       </div>
 
@@ -247,7 +280,8 @@ export default function SearchForm() {
                       {item.title}
                     </a>
                     <div style={{ marginTop: '0.25rem', color: 'var(--text)' }}>
-                      {item.currency} {item.price}
+                      {item.currency} {item.price}{' '}
+                      {item.soldDate ? <span style={{ opacity: 0.8 }}>• Sold {item.soldDate}</span> : null}
                     </div>
                     <div style={{ marginTop: '0.25rem', fontSize: '1rem' }}>
                       {tierEmoji(tier)}
