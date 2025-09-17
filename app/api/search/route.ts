@@ -12,13 +12,13 @@ const UA =
 function buildUrl(rawQuery: string) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
-    sacat: "6028",   // Parts & Accessories
-    _dcat: "6028",   // second lock to the same category
+    sacat: "6028",  // Parts & Accessories
+    _dcat: "6028",
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",      // newly listed first
+    _sop: "10",
     rt: "nc",
-    _ipg: "240"
+    _ipg: "240",
   });
   return `https://www.ebay.com/sch/i.html?${p.toString()}`;
 }
@@ -31,7 +31,7 @@ async function fetchWithTimeout(url: string, ms = 12000) {
       headers: { "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
       cache: "no-store",
       next: { revalidate: 0 },
-      signal: controller.signal
+      signal: controller.signal,
     });
     return res;
   } finally {
@@ -39,27 +39,35 @@ async function fetchWithTimeout(url: string, ms = 12000) {
   }
 }
 
-// grab “Sold Aug 18, 2025” style text keyed by item URL
+// map of href -> "Aug 18, 2025"
 function mapSoldDatesByHref(html: string): Record<string, string> {
   const $ = cheerio.load(html);
   const map: Record<string, string> = {};
   $(".s-item").each((_, el) => {
     const a = $(el).find(".s-item__link").first();
-    const href = a.attr("href") || "";
+    const href = a.attr("href") ?? "";
     if (!href) return;
     const caption =
-      $(el).find(".s-item__caption, .s-item__caption--signal, .s-item__subtitle, .s-item__title--tagblock").text() || "";
+      $(el)
+        .find(
+          ".s-item__caption, .s-item__caption--signal, .s-item__subtitle, .s-item__title--tagblock"
+        )
+        .text() || "";
     const m = caption.match(/\bSold\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i);
     if (m) map[href] = m[1];
   });
   return map;
 }
 
-// conservative vehicle filter to drop whole cars that slip into the page shell
+// conservative vehicle filter
 function dropObviousVehicles(items: Item[]): Item[] {
-  const vehicleWords = /\b(car|truck|sedan|coupe|suv|wagon|hatchback|convertible|miles|odometer|vin|clean title|salvage title)\b/i;
-  return items.filter(i => !vehicleWords.test(i.title || ""));
+  const vehicleWords =
+    /\b(car|truck|sedan|coupe|suv|wagon|hatchback|convertible|miles|odometer|vin|clean title|salvage title)\b/i;
+  return items.filter((i) => !vehicleWords.test((i.title ?? "").toString()));
 }
+
+// locally extend Item to avoid any-casts
+type ItemWithHref = Item & { link?: string; url?: string };
 
 export async function GET(request: NextRequest) {
   try {
@@ -71,27 +79,35 @@ export async function GET(request: NextRequest) {
     const debug = url.searchParams.get("debug") === "1";
 
     if (!year || !make || !model) {
-      return NextResponse.json({ error: "year make model required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "year make model required" },
+        { status: 400 }
+      );
     }
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
     const htmlUrl = buildUrl(rawQuery);
 
-    // fetch with timeout, retry once on non-OK or abort
+    // fetch with timeout, retry once
     let resp = await fetchWithTimeout(htmlUrl);
     if (!resp.ok) resp = await fetchWithTimeout(htmlUrl);
 
     if (!resp.ok) {
       if (debug) {
-        return NextResponse.json({ upstreamUrl: htmlUrl, status: resp.status, items: [] });
+        return NextResponse.json({
+          upstreamUrl: htmlUrl,
+          status: resp.status,
+          items: [],
+        });
       }
       return NextResponse.json([], { status: 200 });
     }
 
     const html = await resp.text();
-    const mentionsCaptcha = /captcha|enable javascript|access denied|automated access/i.test(html);
+    const mentionsCaptcha =
+      /captcha|enable javascript|access denied|automated access/i.test(html);
 
-    // Parse as you do today
+    // parse using your existing parser
     let items: Item[] = [];
     try {
       items = parseEbayHtml(html) || [];
@@ -99,16 +115,16 @@ export async function GET(request: NextRequest) {
       items = [];
     }
 
-    // Extra guards so only parts survive
+    // only parts, no whole vehicles
     items = dropObviousVehicles(items);
 
-    // Optional soldDate enrichment that won’t break your types at runtime
-    // We key by href and attach soldDate if found.
+    // attach soldDate when available
     const soldDates = mapSoldDatesByHref(html);
-    const enriched = items.map((it: Item) => {
-      const href = (it as any).link || (it as any).url || "";
-      const soldDate = soldDates[href] || null;
-      return soldDate ? Object.assign({}, it, { soldDate }) : it;
+    const enriched = items.map((it) => {
+      const href =
+        (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
+      const soldDate = soldDates[href];
+      return soldDate ? { ...(it as object), soldDate } : it;
     });
 
     if (debug) {
@@ -117,14 +133,13 @@ export async function GET(request: NextRequest) {
         status: resp.status,
         bytes: html.length,
         mentionsCaptcha,
-        count: enriched.length
+        count: enriched.length,
       });
     }
 
-    // Always succeed with an array so the page does not “stick” until redeploy
     return NextResponse.json(enriched, { status: 200 });
-  } catch (e: unknown) {
-    // Never throw: return an empty array so the UI stays alive
+  } catch {
+    // do not expose unused error variable
     return NextResponse.json([], { status: 200 });
   }
 }
