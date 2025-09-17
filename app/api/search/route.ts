@@ -13,21 +13,22 @@ const UA =
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
+// *** IMPORTANT: category-anchored path (6028) to force Parts & Accessories ***
+const BASE = "https://www.ebay.com/sch/6028/i.html";
+
 function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: number) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
-    sacat: "6028",            // Parts and Accessories
-    _dcat: "6028",
     LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",
+    _sop: "10",               // recent first
     rt: "nc",
     _ipg: String(Math.min(Math.max(ipg, 10), 240))
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
-  return `https://www.ebay.com/sch/i.html?${p.toString()}`;
+  return `${BASE}?${p.toString()}`;
 }
 
 async function fetchWithTimeout(url: string, ms = 12000) {
@@ -46,7 +47,7 @@ async function fetchWithTimeout(url: string, ms = 12000) {
   }
 }
 
-// href to "Aug 18, 2025"
+// href -> "Aug 18, 2025"
 function mapSoldDatesByHref(html: string): Record<string, string> {
   const $ = cheerio.load(html);
   const map: Record<string, string> = {};
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
     const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10) || 30, 240));
 
     // single checkbox param
-    const junkyard = url.searchParams.get("junkyard") === "1"; // 100..400
+    const junkyard = url.searchParams.get("junkyard") === "1"; // $100..$400
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
 
@@ -118,7 +119,7 @@ export async function GET(request: NextRequest) {
       items = [];
     }
 
-    // second layer price filter
+    // safety price filter (in case upstream occasionally ignores _udlo/_udhi)
     const priceFiltered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
