@@ -121,7 +121,7 @@ export default function SearchForm() {
     soldParams.set('_udlo', '100')
     soldParams.set('_udhi', '400')
   }
-  const soldSearchUrl = `https://www.ebay.com/sch/i.html?${soldParams.toString()}`
+  const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
 
   const activeParams = new URLSearchParams({ _nkw: rawQuery })
   const activeSearchUrl = `https://www.ebay.com/sch/i.html?${activeParams.toString()}`
