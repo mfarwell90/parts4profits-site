@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
     const details = url.searchParams.get("details") ?? "";
 
     const debug = url.searchParams.get("debug") === "1";
-    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10) || 30, 240));
+    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240)); // DEFAULT 50
 
     // single checkbox param
     const junkyard = url.searchParams.get("junkyard") === "1"; // $100..$400

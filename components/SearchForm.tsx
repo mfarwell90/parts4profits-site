@@ -1,4 +1,3 @@
-// app/components/SearchForm.tsx
 'use client'
 
 import { useState } from 'react'
@@ -41,12 +40,12 @@ export default function SearchForm() {
   const [results, setResults] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
 
-  // all unchecked by default
+  // existing toggles
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
 
-  // new single checkbox
+  // new single checkbox (already wired server-side)
   const [junkyard, setJunkyard] = useState(false) // $100–$400
 
   const [averagePrice, setAveragePrice] = useState<string | null>(null)
@@ -63,12 +62,11 @@ export default function SearchForm() {
 
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '30') // default 30 results with images
+      qs.set('limit', '50') // DEFAULT 50 results
 
       if (junkyard) qs.set('junkyard', '1')
 
       const endpoint = showActive ? `/api/search-active?${qs.toString()}` : `/api/search?${qs.toString()}`
-
       const res = await fetch(endpoint)
       if (!res.ok) {
         console.error('API error:', await res.text())
@@ -108,11 +106,9 @@ export default function SearchForm() {
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // Build the eBay URLs for the "See all results" link
+  // *** ANCHORED TO PARTS & ACCESSORIES (6028) ***
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
-    sacat: '6028',
-    _dcat: '6028',
     LH_ItemCondition: '3000',
     LH_Sold: '1',
     LH_Complete: '1'
@@ -123,23 +119,15 @@ export default function SearchForm() {
   }
   const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
 
-  const activeParams = new URLSearchParams({ _nkw: rawQuery })
-  const activeSearchUrl = `https://www.ebay.com/sch/i.html?${activeParams.toString()}`
-
+  const activeParams = new URLSearchParams({
+    _nkw: rawQuery,
+    LH_ItemCondition: '3000'
+  })
+  const activeSearchUrl = `https://www.ebay.com/sch/6028/i.html?${activeParams.toString()}`
   const affiliateSearchUrl =
     `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
     `${encodeURIComponent(activeSearchUrl)}`
-
-  const counts = results.reduce(
-    (acc, item) => {
-      const priceNum = parseFloat(item.price) || 0
-      const tier = getFlipTier(priceNum)
-      acc[tier] = (acc[tier] || 0) + 1
-      return acc
-    },
-    { Trash: 0, ThumbsUp: 0, Check: 0, Star: 0, Fire: 0 } as Record<FlipTier, number>
-  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -220,22 +208,21 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* totals with emoji only */}
-      {!showActive && (
-        <div
-          style={{
-            marginTop: '0.75rem',
-            padding: '0.75rem 1.25rem',
-            backgroundColor: 'var(--muted)',
-            borderRadius: '8px',
-            textAlign: 'center',
-            lineHeight: 1.5,
-            fontSize: '1.05rem'
-          }}
-        >
-          🔥 {counts.Fire}  •  ⭐ {counts.Star}  •  ✔️ {counts.Check}  •  👍 {counts.ThumbsUp}  •  🗑️ {counts.Trash}
-        </div>
-      )}
+      {/* DISCLAIMER replaces the flip counter panel */}
+      <div
+        style={{
+          marginTop: '0.75rem',
+          padding: '0.75rem 1.25rem',
+          backgroundColor: 'var(--muted)',
+          borderRadius: '8px',
+          textAlign: 'center',
+          lineHeight: 1.5,
+          fontSize: '0.95rem'
+        }}
+      >
+        <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
+        result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
+      </div>
 
       {loading && <p>Loading results…</p>}
 
