@@ -9,21 +9,20 @@ export const maxDuration = 20;
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
-// Build sold-history URL strictly within eBay Motors Parts & Accessories, Used items only
+// Build sold-history URL inside Parts & Accessories, Used only
 function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: number) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
     sacat: "6028",            // Parts & Accessories
-    _dcat: "6028",            // secondary lock
+    _dcat: "6028",
     LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",               // recent first
+    _sop: "10",
     rt: "nc",
-    _ipg: String(Math.min(Math.max(ipg, 10), 240)), // clamp 10..240
+    _ipg: String(Math.min(Math.max(ipg, 10), 240)),
   });
 
-  // eBay price band filters
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
 
@@ -74,6 +73,13 @@ function coercePriceToNumber(p?: string | number): number | null {
   return m ? parseFloat(m[1]) : null;
 }
 
+// type guard used only for debug sampleTitles
+function hasTitle(x: unknown): x is { title: string } {
+  if (typeof x !== "object" || x === null) return false;
+  const maybe = x as Record<string, unknown>;
+  return typeof maybe.title === "string";
+}
+
 export async function GET(request: NextRequest) {
   try {
     const url = new URL(request.url);
@@ -85,10 +91,8 @@ export async function GET(request: NextRequest) {
     const debug = url.searchParams.get("debug") === "1";
     const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "30", 10) || 30, 240)); // default 30
 
-    // Single new toggle for your checkbox
+    // single checkbox param
     const junkyard = url.searchParams.get("junkyard") === "1"; // 100..400
-
-    // price band logic
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
 
@@ -114,7 +118,7 @@ export async function GET(request: NextRequest) {
     const mentionsCaptcha =
       /captcha|enable javascript|access denied|automated access/i.test(html);
 
-    // Parse using your current parser
+    // parse with your existing parser
     let items: Item[] = [];
     try {
       items = parseEbayHtml(html) || [];
@@ -122,7 +126,7 @@ export async function GET(request: NextRequest) {
       items = [];
     }
 
-    // Server-side price filter too, in case upstream ignores _udlo/_udhi occasionally
+    // server price filter as a second layer
     const priceFiltered = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -131,7 +135,7 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // Attach soldDate from the list page where available
+    // add soldDate when present on the list page
     const soldDates = mapSoldDatesByHref(html);
     const enriched = priceFiltered.map((it) => {
       const href = (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
@@ -139,23 +143,22 @@ export async function GET(request: NextRequest) {
       return soldDate ? { ...(it as object), soldDate } : it;
     });
 
-    // Cap to the requested limit
     const finalItems = enriched.slice(0, limit);
 
     if (debug) {
+      const sampleTitles = finalItems.slice(0, 5).filter(hasTitle).map((x) => x.title);
       return NextResponse.json({
         upstreamUrl: htmlUrl,
         status: resp.status,
         bytes: html.length,
         mentionsCaptcha,
         count: finalItems.length,
-        sampleTitles: finalItems.slice(0, 5).map((x: any) => x.title),
+        sampleTitles
       });
     }
 
     return NextResponse.json(finalItems, { status: 200 });
   } catch {
-    // Never fail hard; return empty so UI stays alive
     return NextResponse.json([], { status: 200 });
   }
 }
