@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // app/components/SearchForm.tsx
 'use client'
 
@@ -91,9 +92,8 @@ export default function SearchForm() {
 
       const base = showActive ? '/api/search-active' : '/api/search'
       const endpoint = `${base}?${qs.toString()}`
-      const res = await fetch(endpoint, { cache: 'no-store' }) // 'next' is ignored in browser
+      const res = await fetch(endpoint, { cache: 'no-store' })
 
-      // Accept both legacy array and new {items, meta}
       const data = await res.json()
       const items: Item[] = Array.isArray(data) ? data : (data?.items ?? [])
 
@@ -104,7 +104,6 @@ export default function SearchForm() {
         return
       }
 
-      // Optional: show gentle message if upstream blocked or empty
       const hadError = !Array.isArray(data) && data?.meta?.reason
       if (hadError) setMessage('Upstream is slow or rate limited. Try again or tweak your query.')
 
@@ -166,14 +165,13 @@ export default function SearchForm() {
         <button type="submit" disabled={loading}>{loading ? 'Searching…' : 'Search'}</button>
       </form>
 
-      {/* toggles */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <label style={{ cursor: 'pointer' }}>
           <input type="checkbox" checked={showActive} onChange={() => setShowActive(!showActive)} style={{ marginRight: '0.5rem' }} />
           Show Active Listings
         </label>
 
-        { (haveSearched || loading) && (
+        {(haveSearched || loading) && (
           <>
             <label style={{ cursor: 'pointer' }}>
               <input type="checkbox" checked={sortHigh} onChange={() => setSortHigh(!sortHigh)} style={{ marginRight: '0.5rem' }} />
