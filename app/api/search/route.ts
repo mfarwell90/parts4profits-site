@@ -1,12 +1,10 @@
 // app/api/search/route.ts
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { parseEbayHtml, Item } from "../../../lib/ebayParser";
 import * as cheerio from "cheerio";
 
 export const runtime = "nodejs";
 export const maxDuration = 20;
-
-// Force dynamic so nothing is statically cached
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -16,7 +14,6 @@ const UA =
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
-// Anchor to Parts and Accessories category 6028
 const BASE = "https://www.ebay.com/sch/6028/i.html";
 
 function noStoreHeaders() {
@@ -34,7 +31,7 @@ function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: n
     LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10", // recent first
+    _sop: "10",
     rt: "nc",
     _ipg: String(Math.min(Math.max(ipg, 10), 240)),
   });
@@ -48,7 +45,11 @@ async function fetchWithTimeout(url: string, ms = 12000): Promise<Response> {
   const t = setTimeout(() => controller.abort(), ms);
   try {
     const res = await fetch(url, {
-      headers: { "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
+      headers: {
+        "user-agent": UA,
+        "accept-language": "en-US,en;q=0.9",
+        accept: "text/html,application/xhtml+xml",
+      },
       cache: "no-store",
       next: { revalidate: 0 },
       redirect: "follow",
@@ -74,9 +75,7 @@ function mapSoldDatesByHref(html: string): Record<string, string> {
         .text() || "";
 
     const m = caption.match(/\bSold\s+([A-Za-z]{3,9}\s+\d{1,2},\s+\d{4})/i);
-    if (m) {
-      map[href] = m[1];
-    }
+    if (m) map[href] = m[1];
   });
   return map;
 }
@@ -89,6 +88,7 @@ function coercePriceToNumber(p?: string | number): number | null {
 }
 
 export async function GET(request: NextRequest) {
+  const meta: Record<string, unknown> = {};
   try {
     const url = new URL(request.url);
     const year = url.searchParams.get("year") ?? "";
@@ -97,37 +97,37 @@ export async function GET(request: NextRequest) {
     const details = url.searchParams.get("details") ?? "";
     const debug = url.searchParams.get("debug") === "1";
 
-    const junkyard = url.searchParams.get("junkyard") === "1"; // 100..400 band
+    const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
 
     const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240));
 
     if (!year || !make || !model) {
-      return new Response(JSON.stringify({ error: "year make model required" }), {
-        status: 400,
+      return new NextResponse(JSON.stringify({ items: [], meta: { error: "year make model required" } }), {
+        status: 200,
         headers: noStoreHeaders(),
       });
     }
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
     const htmlUrl = buildUrl(rawQuery, limit, priceMin, priceMax);
+    meta.upstreamUrl = htmlUrl;
 
-    // fetch with timeout, retry once
     let resp = await fetchWithTimeout(htmlUrl);
     if (!resp.ok) resp = await fetchWithTimeout(htmlUrl);
 
-    // return 5xx for upstream issues so empty results are not cached as OK
-    if (resp.status === 429 || resp.status === 403) {
-      const body = { error: true, reason: "rate_limited", status: resp.status, upstreamUrl: htmlUrl };
-      return new Response(JSON.stringify(body), { status: 503, headers: noStoreHeaders() });
-    }
-    if (!resp.ok) {
-      const body = { error: true, reason: "upstream_failed", status: resp.status, upstreamUrl: htmlUrl };
-      return new Response(JSON.stringify(body), { status: 502, headers: noStoreHeaders() });
+    meta.upstreamStatus = resp.status;
+
+    if (!resp.ok || resp.status === 429 || resp.status === 403) {
+      return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "upstream_blocked" } }), {
+        status: 200,
+        headers: noStoreHeaders(),
+      });
     }
 
     const html = await resp.text();
+    meta.bytes = html.length;
 
     // parse
     let items: Item[] = [];
@@ -137,7 +137,7 @@ export async function GET(request: NextRequest) {
       items = [];
     }
 
-    // client safety filter in case upstream ignores price params
+    // price band safety
     const priceFiltered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -146,7 +146,7 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // enrich with sold date from the same HTML
+    // enrich sold date
     const soldDates = mapSoldDatesByHref(html);
     const enriched: ItemOut[] = priceFiltered.map((it) => {
       const href = (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
@@ -155,27 +155,18 @@ export async function GET(request: NextRequest) {
     });
 
     const finalItems: ItemOut[] = enriched.slice(0, limit);
+    meta.count = finalItems.length;
 
-    // empty parse treated as temporary failure to avoid sticky empty caches
-    if (!finalItems || finalItems.length === 0) {
-      const body = { error: true, reason: "empty_parse", upstreamUrl: htmlUrl };
-      return new Response(JSON.stringify(body), { status: 502, headers: noStoreHeaders() });
-    }
-
-    if (debug) {
-      const body = {
-        upstreamUrl: htmlUrl,
-        status: resp.status,
-        bytes: html.length,
-        count: finalItems.length,
-      };
-      return new Response(JSON.stringify(body), { status: 200, headers: noStoreHeaders() });
-    }
-
-    return new Response(JSON.stringify(finalItems), { status: 200, headers: noStoreHeaders() });
+    // Always 200 with no-store. If empty, include a reason so the UI can show a message.
+    return new NextResponse(JSON.stringify({ items: finalItems, meta }), {
+      status: 200,
+      headers: noStoreHeaders(),
+    });
   } catch (err) {
     const aborted = err instanceof Error && err.name === "AbortError";
-    const body = { error: true, reason: aborted ? "timeout" : "exception" };
-    return new Response(JSON.stringify(body), { status: 504, headers: noStoreHeaders() });
+    return new NextResponse(JSON.stringify({ items: [], meta: { reason: aborted ? "timeout" : "exception" } }), {
+      status: 200,
+      headers: noStoreHeaders(),
+    });
   }
 }
