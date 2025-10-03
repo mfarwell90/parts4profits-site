@@ -43,24 +43,20 @@ export default function SearchForm() {
   const [model, setModel] = useState('')
   const [details, setDetails] = useState('')
 
-  // raw vs displayed results
   const [rawResults, setRawResults] = useState<Item[]>([])
   const [results, setResults] = useState<Item[]>([])
   const [loading, setLoading] = useState(false)
 
-  // toggles
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
   const [showActive, setShowActive] = useState(false)
-  const [junkyard, setJunkyard] = useState(false) // $100–$400
+  const [junkyard, setJunkyard] = useState(false) // 100..400
 
   const haveSearched = rawResults.length > 0
 
-  // derive displayed results from raw + toggles (no submit needed)
   const derivedResults = useMemo(() => {
     let list = [...rawResults]
 
-    // client-side Junkyard Specialties band
     if (!showActive && junkyard) {
       list = list.filter(it => {
         const n = priceNum(it.price)
@@ -68,12 +64,10 @@ export default function SearchForm() {
       })
     }
 
-    // Fire flips
     if (fireOnly) {
       list = list.filter(it => priceNum(it.price) >= 300)
     }
 
-    // Sort by Highest
     if (sortHigh) {
       list.sort((a, b) => priceNum(b.price) - priceNum(a.price))
     }
@@ -81,12 +75,10 @@ export default function SearchForm() {
     return list
   }, [rawResults, junkyard, fireOnly, sortHigh, showActive])
 
-  // keep state in sync
   useEffect(() => {
     setResults(derivedResults)
   }, [derivedResults])
 
-  // average for SOLD view, computed off displayed items
   const averagePrice = useMemo(() => {
     if (showActive || results.length === 0) return null
     const total = results.reduce((sum, item) => sum + priceNum(item.price), 0)
@@ -99,21 +91,28 @@ export default function SearchForm() {
 
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '50') // default 50 results
+      qs.set('limit', '50')
 
-      // NOTE: we still include junkyard on first fetch if it's already checked,
-      // but after that the checkbox works client-side without another fetch.
       if (junkyard) qs.set('junkyard', '1')
 
-      const endpoint = showActive ? `/api/search-active?${qs.toString()}` : `/api/search?${qs.toString()}`
-      const res = await fetch(endpoint)
-      if (!res.ok) throw new Error(await res.text())
+      // cache bust and opt out of caching at the client fetch layer
+      qs.set('t', String(Date.now()))
+      const base = showActive ? '/api/search-active' : '/api/search'
+      const endpoint = `${base}?${qs.toString()}`
+      const res = await fetch(endpoint, { cache: 'no-store', next: { revalidate: 0 } })
+
+      if (!res.ok) {
+        // show a friendly error and clear results
+        console.error('Search failed with status', res.status)
+        setRawResults([])
+        setResults([])
+        return
+      }
 
       const json = await res.json()
       if (!Array.isArray(json)) throw new Error('Unexpected API result')
 
-      setRawResults(json)         // keep the original set
-      // setResults happens via useEffect(derivedResults)
+      setRawResults(json)
     } catch (err) {
       console.error('Search failed:', err)
       setRawResults([])
@@ -125,7 +124,6 @@ export default function SearchForm() {
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // *** ANCHORED TO PARTS & ACCESSORIES (6028) for consistency with server ***
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000',
@@ -148,7 +146,6 @@ export default function SearchForm() {
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
     `${encodeURIComponent(activeSearchUrl)}`
 
-  // flip counts from the displayed SOLD results
   const counts = results.reduce(
     (acc, item) => {
       const tier = getFlipTier(priceNum(item.price))
@@ -160,9 +157,8 @@ export default function SearchForm() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      {/* legend above the search, emoji only */}
       <div style={{ marginBottom: '0.5rem', fontSize: '0.95rem', color: 'var(--text)', textAlign: 'center' }}>
-        🔥 $300+   •   ⭐ $151 - $300   •   ✔️ $76 - $150   •   👍 $16 - $75   •   🗑️ &lt;$15
+        🔥 $300+   •   ⭐ $151 to $300   •   ✔️ $76 to $150   •   👍 $16 to $75   •   🗑️ under $15
       </div>
 
       <form
@@ -178,7 +174,6 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* Controls: Show Active is always visible; other filters appear after first search */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <label style={{ cursor: 'pointer' }}>
           <input
@@ -219,13 +214,12 @@ export default function SearchForm() {
                 onChange={e => setJunkyard(e.target.checked)}
                 style={{ marginRight: '0.5rem' }}
               />
-              Junkyard Specialties $100–$400
+              Junkyard Specialties 100 to 400
             </label>
           </>
         )}
       </div>
 
-      {/* SOLD VIEW: average + counter; ACTIVE VIEW: disclaimer */}
       {!showActive && averagePrice && (
         <div
           style={{

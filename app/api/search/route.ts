@@ -1,20 +1,32 @@
 // app/api/search/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { parseEbayHtml, Item } from "../../../lib/ebayParser";
 import * as cheerio from "cheerio";
 
 export const runtime = "nodejs";
 export const maxDuration = 20;
 
+// Force dynamic so nothing is statically cached
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
-// client item plus optional soldDate
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
-// *** IMPORTANT: category-anchored path (6028) to force Parts & Accessories ***
+// Anchor to Parts and Accessories category 6028
 const BASE = "https://www.ebay.com/sch/6028/i.html";
+
+function noStoreHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    Pragma: "no-cache",
+    Expires: "0"
+  };
+}
 
 function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: number) {
   const p = new URLSearchParams({
@@ -39,6 +51,7 @@ async function fetchWithTimeout(url: string, ms = 12000) {
       headers: { "user-agent": UA, "accept-language": "en-US,en;q=0.9" },
       cache: "no-store",
       next: { revalidate: 0 },
+      redirect: "follow",
       signal: controller.signal
     });
     return res;
@@ -47,7 +60,6 @@ async function fetchWithTimeout(url: string, ms = 12000) {
   }
 }
 
-// href -> "Aug 18, 2025"
 function mapSoldDatesByHref(html: string): Record<string, string> {
   const $ = cheerio.load(html);
   const map: Record<string, string> = {};
@@ -83,17 +95,19 @@ export async function GET(request: NextRequest) {
     const make = url.searchParams.get("make") ?? "";
     const model = url.searchParams.get("model") ?? "";
     const details = url.searchParams.get("details") ?? "";
-
     const debug = url.searchParams.get("debug") === "1";
-    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240)); // DEFAULT 50
 
-    // single checkbox param
-    const junkyard = url.searchParams.get("junkyard") === "1"; // $100..$400
+    const junkyard = url.searchParams.get("junkyard") === "1"; // 100..400 band
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
 
+    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240));
+
     if (!year || !make || !model) {
-      return NextResponse.json({ error: "year make model required" }, { status: 400 });
+      return new Response(JSON.stringify({ error: "year make model required" }), {
+        status: 400,
+        headers: noStoreHeaders()
+      });
     }
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
@@ -102,16 +116,20 @@ export async function GET(request: NextRequest) {
     // fetch with timeout, retry once
     let resp = await fetchWithTimeout(htmlUrl);
     if (!resp.ok) resp = await fetchWithTimeout(htmlUrl);
+
+    // return 5xx for upstream issues so empty results are not cached as OK
+    if (resp.status === 429 || resp.status === 403) {
+      const body = { error: true, reason: "rate_limited", status: resp.status, upstreamUrl: htmlUrl };
+      return new Response(JSON.stringify(body), { status: 503, headers: noStoreHeaders() });
+    }
     if (!resp.ok) {
-      if (debug) {
-        return NextResponse.json({ upstreamUrl: htmlUrl, status: resp.status, count: 0 });
-      }
-      return NextResponse.json([], { status: 200 });
+      const body = { error: true, reason: "upstream_failed", status: resp.status, upstreamUrl: htmlUrl };
+      return new Response(JSON.stringify(body), { status: 502, headers: noStoreHeaders() });
     }
 
     const html = await resp.text();
 
-    // parse with your parser
+    // parse
     let items: Item[] = [];
     try {
       items = parseEbayHtml(html) || [];
@@ -119,7 +137,7 @@ export async function GET(request: NextRequest) {
       items = [];
     }
 
-    // safety price filter (in case upstream occasionally ignores _udlo/_udhi)
+    // client safety filter in case upstream ignores price params
     const priceFiltered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -128,7 +146,7 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // add soldDate
+    // enrich with sold date from the same HTML
     const soldDates = mapSoldDatesByHref(html);
     const enriched: ItemOut[] = priceFiltered.map((it) => {
       const href = (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
@@ -138,17 +156,25 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = enriched.slice(0, limit);
 
+    // empty parse treated as temporary failure to avoid sticky empty caches
+    if (!finalItems || finalItems.length === 0) {
+      const body = { error: true, reason: "empty_parse", upstreamUrl: htmlUrl };
+      return new Response(JSON.stringify(body), { status: 502, headers: noStoreHeaders() });
+    }
+
     if (debug) {
-      return NextResponse.json({
+      const body = {
         upstreamUrl: htmlUrl,
         status: resp.status,
         bytes: html.length,
         count: finalItems.length
-      });
+      };
+      return new Response(JSON.stringify(body), { status: 200, headers: noStoreHeaders() });
     }
 
-    return NextResponse.json(finalItems, { status: 200 });
-  } catch {
-    return NextResponse.json([], { status: 200 });
+    return new Response(JSON.stringify(finalItems), { status: 200, headers: noStoreHeaders() });
+  } catch (err: any) {
+    const body = { error: true, reason: err?.name === "AbortError" ? "timeout" : "exception" };
+    return new Response(JSON.stringify(body), { status: 504, headers: noStoreHeaders() });
   }
 }
