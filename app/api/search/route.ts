@@ -24,7 +24,7 @@ function noStoreHeaders() {
     "Content-Type": "application/json",
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     Pragma: "no-cache",
-    Expires: "0"
+    Expires: "0",
   };
 }
 
@@ -34,16 +34,16 @@ function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: n
     LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",               // recent first
+    _sop: "10", // recent first
     rt: "nc",
-    _ipg: String(Math.min(Math.max(ipg, 10), 240))
+    _ipg: String(Math.min(Math.max(ipg, 10), 240)),
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
   return `${BASE}?${p.toString()}`;
 }
 
-async function fetchWithTimeout(url: string, ms = 12000) {
+async function fetchWithTimeout(url: string, ms = 12000): Promise<Response> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
   try {
@@ -52,7 +52,7 @@ async function fetchWithTimeout(url: string, ms = 12000) {
       cache: "no-store",
       next: { revalidate: 0 },
       redirect: "follow",
-      signal: controller.signal
+      signal: controller.signal,
     });
     return res;
   } finally {
@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
     if (!year || !make || !model) {
       return new Response(JSON.stringify({ error: "year make model required" }), {
         status: 400,
-        headers: noStoreHeaders()
+        headers: noStoreHeaders(),
       });
     }
 
@@ -167,14 +167,15 @@ export async function GET(request: NextRequest) {
         upstreamUrl: htmlUrl,
         status: resp.status,
         bytes: html.length,
-        count: finalItems.length
+        count: finalItems.length,
       };
       return new Response(JSON.stringify(body), { status: 200, headers: noStoreHeaders() });
     }
 
     return new Response(JSON.stringify(finalItems), { status: 200, headers: noStoreHeaders() });
-  } catch (err: any) {
-    const body = { error: true, reason: err?.name === "AbortError" ? "timeout" : "exception" };
+  } catch (err) {
+    const aborted = err instanceof Error && err.name === "AbortError";
+    const body = { error: true, reason: aborted ? "timeout" : "exception" };
     return new Response(JSON.stringify(body), { status: 504, headers: noStoreHeaders() });
   }
 }
