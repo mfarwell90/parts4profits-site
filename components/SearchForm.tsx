@@ -88,12 +88,13 @@ export default function SearchForm() {
       const qs = new URLSearchParams({ year, make, model, details })
       qs.set('limit', '50')
       if (junkyard) qs.set('junkyard', '1')
-      qs.set('t', String(Date.now())) // cache-bust
+      qs.set('t', String(Date.now())) // cache-bust every request
 
       const base = showActive ? '/api/search-active' : '/api/search'
       const endpoint = `${base}?${qs.toString()}`
       const res = await fetch(endpoint, { cache: 'no-store' })
 
+      // Accept either legacy plain array or new {items,meta}
       const data = await res.json()
       const items: Item[] = Array.isArray(data) ? data : (data?.items ?? [])
 

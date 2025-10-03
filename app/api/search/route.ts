@@ -14,6 +14,7 @@ const UA =
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
+// Anchor to Parts & Accessories category (6028)
 const BASE = "https://www.ebay.com/sch/6028/i.html";
 
 function noStoreHeaders() {
@@ -25,15 +26,23 @@ function noStoreHeaders() {
   };
 }
 
-function buildUrl(rawQuery: string, ipg: number, priceMin?: number, priceMax?: number) {
+function buildUrl(opts: {
+  rawQuery: string;
+  perPage: number;
+  page: number;
+  priceMin?: number;
+  priceMax?: number;
+}) {
+  const { rawQuery, perPage, page, priceMin, priceMax } = opts;
   const p = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",
+    _sop: "10", // recent first
     rt: "nc",
-    _ipg: String(Math.min(Math.max(ipg, 10), 240)),
+    _ipg: String(Math.min(Math.max(perPage, 10), 240)),
+    _pgn: String(Math.max(page, 1)),
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
@@ -95,14 +104,13 @@ export async function GET(request: NextRequest) {
     const make = url.searchParams.get("make") ?? "";
     const model = url.searchParams.get("model") ?? "";
     const details = url.searchParams.get("details") ?? "";
-    const debug = url.searchParams.get("debug") === "1";
 
+    // Optional price band for the “Junkyard Specialties $100–$400” toggle
     const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
 
     const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240));
-
     if (!year || !make || !model) {
       return new NextResponse(JSON.stringify({ items: [], meta: { error: "year make model required" } }), {
         status: 200,
@@ -111,34 +119,53 @@ export async function GET(request: NextRequest) {
     }
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
-    const htmlUrl = buildUrl(rawQuery, limit, priceMin, priceMax);
-    meta.upstreamUrl = htmlUrl;
 
-    let resp = await fetchWithTimeout(htmlUrl);
-    if (!resp.ok) resp = await fetchWithTimeout(htmlUrl);
+    // SPEED: fetch up to 2 pages in parallel (smaller HTML each), then stop when we have enough.
+    const perPage = Math.min(Math.max(limit, 10), 120); // keep per-page manageable
+    const neededPages = Math.min(2, Math.ceil(limit / perPage)); // cap at 2 pages to avoid throttle
+    const pageUrls = Array.from({ length: neededPages }, (_, i) =>
+      buildUrl({ rawQuery, perPage, page: i + 1, priceMin, priceMax })
+    );
 
-    meta.upstreamStatus = resp.status;
+    meta.upstream = pageUrls;
 
-    if (!resp.ok || resp.status === 429 || resp.status === 403) {
-      return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "upstream_blocked" } }), {
+    // Fetch pages in parallel
+    const responses = await Promise.allSettled(pageUrls.map((u) => fetchWithTimeout(u)));
+    const okResponses = responses
+      .map((r) => (r.status === "fulfilled" ? r.value : null))
+      .filter((r): r is Response => !!r && r.ok);
+
+    // If all failed, return empty with a reason (keeps 200/no-store so nothing sticky caches)
+    if (okResponses.length === 0) {
+      return new NextResponse(JSON.stringify({ items: [], meta: { reason: "upstream_failed" } }), {
         status: 200,
         headers: noStoreHeaders(),
       });
     }
 
-    const html = await resp.text();
-    meta.bytes = html.length;
+    // Read HTML for each successful page (in parallel)
+    const htmlPages = await Promise.all(okResponses.map((r) => r.text()));
+    meta.pages = htmlPages.length;
 
-    // parse
-    let items: Item[] = [];
-    try {
-      items = parseEbayHtml(html) || [];
-    } catch {
-      items = [];
+    // Parse each page and merge, while keeping price band enforcement
+    const allItems: Item[] = [];
+    const soldDatesGlobal: Record<string, string> = {};
+    for (const html of htmlPages) {
+      let items: Item[] = [];
+      try {
+        items = parseEbayHtml(html) || [];
+      } catch {
+        items = [];
+      }
+      // Merge sold dates map
+      const pageDates = mapSoldDatesByHref(html);
+      Object.assign(soldDatesGlobal, pageDates);
+      allItems.push(...items);
+      if (allItems.length >= limit) break; // early stop if we already have enough
     }
 
-    // price band safety
-    const priceFiltered: Item[] = items.filter((it) => {
+    // Safety price filter
+    const filtered = allItems.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
       if (typeof priceMin === "number" && n < priceMin) return false;
@@ -146,18 +173,26 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // enrich sold date
-    const soldDates = mapSoldDatesByHref(html);
-    const enriched: ItemOut[] = priceFiltered.map((it) => {
+    // Deduplicate by link (occasionally the same item appears across pages)
+    const seen = new Set<string>();
+    const deduped: Item[] = [];
+    for (const it of filtered) {
       const href = (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
-      const soldDate = soldDates[href];
+      if (!href || seen.has(href)) continue;
+      seen.add(href);
+      deduped.push(it);
+    }
+
+    // Enrich with soldDate
+    const enriched: ItemOut[] = deduped.map((it) => {
+      const href = (it as ItemWithHref).link ?? (it as ItemWithHref).url ?? "";
+      const soldDate = soldDatesGlobal[href];
       return soldDate ? { ...(it as Item), soldDate } : (it as Item);
     });
 
     const finalItems: ItemOut[] = enriched.slice(0, limit);
     meta.count = finalItems.length;
 
-    // Always 200 with no-store. If empty, include a reason so the UI can show a message.
     return new NextResponse(JSON.stringify({ items: finalItems, meta }), {
       status: 200,
       headers: noStoreHeaders(),
