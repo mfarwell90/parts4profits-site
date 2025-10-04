@@ -13,9 +13,7 @@ const UA_DESKTOP =
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
-// Parts & Accessories (6028)
 const BASE_CAT = "https://www.ebay.com/sch/6028/i.html";
-// Generic (some geos/layouts only populate here for sold pages)
 const BASE_GENERIC = "https://www.ebay.com/sch/i.html";
 
 function noStoreHeaders() {
@@ -30,7 +28,7 @@ function noStoreHeaders() {
 function buildParams(rawQuery: string, perPage: number, page: number, priceMin?: number, priceMax?: number) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
-    LH_ItemCondition: "3000", // Used
+    LH_ItemCondition: "3000",
     LH_Sold: "1",
     LH_Complete: "1",
     _sop: "10",
@@ -97,15 +95,13 @@ export async function GET(request: NextRequest) {
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
     const perPage = Math.min(Math.max(limit, 10), 120);
 
-    // primary request: category-anchored
     const p1 = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
     const url1 = `${BASE_CAT}?${p1.toString()}`;
     meta.upstreamPrimary = url1;
 
-    let html = await fetchHtml(url1);
+    const html = await fetchHtml(url1);
     let items: Item[] = html ? parseEbayHtml(html) : [];
 
-    // robust fallback if parse returned nothing: try generic base
     if (!items || items.length === 0) {
       const p2 = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
       const url2 = `${BASE_GENERIC}?${p2.toString()}`;
@@ -113,13 +109,10 @@ export async function GET(request: NextRequest) {
       const html2 = await fetchHtml(url2);
       if (html2) {
         const parsed2 = parseEbayHtml(html2);
-        if (parsed2 && parsed2.length > 0) {
-          items = parsed2;
-        }
+        if (parsed2 && parsed2.length > 0) items = parsed2;
       }
     }
 
-    // still nothing – return with reason but no sticky cache
     if (!items || items.length === 0) {
       return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "empty_parse" } }), {
         status: 200,
@@ -127,7 +120,6 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // safety price filter
     const filtered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;

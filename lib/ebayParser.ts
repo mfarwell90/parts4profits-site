@@ -15,10 +15,9 @@ function clean(txt: string) {
 
 function fromSelectors($: cheerio.CheerioAPI): Item[] {
   const out: Item[] = [];
-  // eBay rotates between li.s-item / div.s-item and variants
   let nodes = $(".s-item");
   if (nodes.length === 0) nodes = $("li.s-item, div.s-item");
-  if (nodes.length === 0) nodes = $('[data-view*="mi:"] .s-item'); // some experiments
+  if (nodes.length === 0) nodes = $('[data-view*="mi:"] .s-item');
 
   nodes.each((_, el) => {
     const $el = $(el);
@@ -41,7 +40,6 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
       $el.find("img").attr("src") ||
       "";
 
-    // Skip promo tiles / placeholders
     if (!title || /shop on ebay/i.test(title)) return;
     if (!price || !link) return;
 
@@ -57,70 +55,92 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
   return out;
 }
 
-/**
- * Many SRP pages include JSON-LD with @type ItemList and itemListElement
- * which gives us name, url, image, price, currency in a stable format.
- */
+/* ---------- JSON-LD parsing (no `any`) ---------- */
+
+type JSONLDOffer = {
+  price?: string | number;
+  priceCurrency?: string;
+  priceSpecification?: { price?: string | number; priceCurrency?: string };
+};
+
+type JSONLDItem = {
+  name?: string;
+  url?: string;
+  image?: string | string[];
+  price?: string | number;
+  offers?: JSONLDOffer;
+};
+
+type JSONLDList = {
+  ["@type"]?: string;
+  itemListElement?: Array<{ item?: JSONLDItem } | JSONLDItem>;
+};
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function asItemList(node: unknown): JSONLDList | null {
+  if (!isObject(node)) return null;
+  const t = String((node as Record<string, unknown>)["@type"] ?? "").toLowerCase();
+  if (t !== "itemlist") return null;
+  return node as JSONLDList;
+}
+
+function extractItemsFromList(list: JSONLDList): Item[] {
+  const out: Item[] = [];
+  const arr = Array.isArray(list.itemListElement) ? list.itemListElement : [];
+  for (const el of arr) {
+    const item: JSONLDItem | undefined = isObject(el)
+      ? ((el as Record<string, unknown>).item as JSONLDItem) ?? (el as JSONLDItem)
+      : undefined;
+
+    if (!item) continue;
+
+    const title = clean(String(item.name ?? ""));
+    const link = String(item.url ?? "");
+    const imageRaw = item.image;
+    const image = Array.isArray(imageRaw) ? imageRaw[0] : imageRaw;
+
+    const offers = item.offers;
+    const priceVal =
+      (offers?.priceSpecification?.price ??
+        offers?.price ??
+        item.price ??
+        "") as string | number;
+
+    const price = clean(String(priceVal));
+    const currency =
+      offers?.priceSpecification?.priceCurrency ??
+      offers?.priceCurrency ??
+      (price.includes("USD") ? "USD" : undefined);
+
+    if (title && link && price) {
+      out.push({ title, price, currency, image, link });
+    }
+  }
+  return out;
+}
+
 function fromJsonLD($: cheerio.CheerioAPI): Item[] {
   const out: Item[] = [];
   $('script[type="application/ld+json"]').each((_, s) => {
-    let txt = $(s).contents().text();
+    const txt = $(s).contents().text();
     if (!txt) return;
-    try {
-      // Sometimes eBay concatenates multiple JSON objects; try to parse each
-      // Split on }{ boundaries safely.
-      const chunks = txt
-        .replace(/}\s*{/g, "}|||{")
-        .split("|||")
-        .map((c) => c.trim())
-        .filter(Boolean);
 
-      for (const chunk of chunks) {
-        let data: any;
-        try {
-          data = JSON.parse(chunk);
-        } catch {
-          continue;
+    const chunks = txt.replace(/}\s*{/g, "}|||{").split("|||").map((c) => c.trim()).filter(Boolean);
+    for (const chunk of chunks) {
+      try {
+        const parsed: unknown = JSON.parse(chunk);
+        const nodes: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+        for (const node of nodes) {
+          const list = asItemList(node);
+          if (!list) continue;
+          out.push(...extractItemsFromList(list));
         }
-        // Look for ItemList
-        const lists: any[] = [];
-        if (Array.isArray(data)) lists.push(...data);
-        else lists.push(data);
-
-        for (const node of lists) {
-          const type = (node["@type"] || node.type || "").toString().toLowerCase();
-          if (type !== "itemlist") continue;
-          const arr = node.itemListElement || node.itemlist || [];
-          for (const el of arr) {
-            const item = el.item || el;
-            if (!item) continue;
-            const title = clean(item.name || "");
-            const link = item.url || "";
-            const image = Array.isArray(item.image) ? item.image[0] : item.image;
-            // price may live under offers
-            const offers = item.offers || {};
-            const price =
-              clean(String(offers.price || offers.priceSpecification?.price || "")) ||
-              clean(String(item.price || ""));
-            const currency =
-              offers.priceCurrency ||
-              offers.priceSpecification?.priceCurrency ||
-              (price.includes("USD") ? "USD" : undefined);
-
-            if (title && link && price) {
-              out.push({
-                title,
-                price,
-                currency,
-                image,
-                link,
-              });
-            }
-          }
-        }
+      } catch {
+        // ignore bad chunk
       }
-    } catch {
-      /* ignore bad JSON blobs */
     }
   });
   return out;
@@ -129,36 +149,26 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
 export function parseEbayHtml(html: string): Item[] {
   const $ = cheerio.load(html);
 
-  // 1) Try selector-based parsing
   let items = fromSelectors($);
   if (items.length > 0) return items;
 
-  // 2) Fall back to JSON-LD ItemList if selectors found nothing
   items = fromJsonLD($);
   if (items.length > 0) return items;
 
-  // 3) Last chance: look for generic anchors with price nearby (very permissive)
+  // very loose final fallback
   const loose: Item[] = [];
   $("a[href*='ebay.com/itm']").each((_, a) => {
     const $a = $(a);
     const link = $a.attr("href") || "";
     const title = clean($a.text());
     if (!title || !link) return;
-
-    // Walk up a bit and try to find a price string in siblings
     const ctx = $a.closest("li,div");
     const priceText =
       clean(ctx.find("*:contains('$')").first().text()) ||
       clean($a.parent().text());
-
     if (/\$\s*\d/.test(priceText)) {
-      loose.push({
-        title,
-        price: priceText,
-        link,
-      });
+      loose.push({ title, price: priceText, link });
     }
   });
-
   return loose;
 }
