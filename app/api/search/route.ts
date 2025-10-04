@@ -7,8 +7,10 @@ export const maxDuration = 20;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const UA_DESKTOP =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
+const UA_CHROME =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const UA_FIREFOX =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0";
 
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
@@ -41,16 +43,28 @@ function buildParams(rawQuery: string, perPage: number, page: number, priceMin?:
   return p;
 }
 
-async function fetchHtml(url: string, ms = 14000): Promise<string | null> {
+function browserHeaders(ua: string) {
+  return {
+    "user-agent": ua,
+    "accept":
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "accept-language": "en-US,en;q=0.9",
+    "cache-control": "no-store",
+    "upgrade-insecure-requests": "1",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-user": "?1",
+    "sec-fetch-dest": "document",
+    "referer": "https://www.ebay.com/",
+  };
+}
+
+async function fetchHtml(url: string, ua: string, ms = 14000): Promise<string | null> {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
   try {
     const res = await fetch(url, {
-      headers: {
-        "user-agent": UA_DESKTOP,
-        "accept-language": "en-US,en;q=0.9",
-        accept: "text/html,application/xhtml+xml",
-      },
+      headers: browserHeaders(ua),
       cache: "no-store",
       next: { revalidate: 0 },
       redirect: "follow",
@@ -63,6 +77,16 @@ async function fetchHtml(url: string, ms = 14000): Promise<string | null> {
   } finally {
     clearTimeout(t);
   }
+}
+
+function looksLikeBotCheck(html: string): boolean {
+  const h = html.toLowerCase();
+  return (
+    h.includes("verify you're a human") ||
+    h.includes("robot") ||
+    h.includes("captcha") ||
+    h.includes("to continue, please")
+  );
 }
 
 function coercePriceToNumber(p?: string | number): number | null {
@@ -95,21 +119,65 @@ export async function GET(request: NextRequest) {
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
     const perPage = Math.min(Math.max(limit, 10), 120);
 
-    const p1 = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
-    const url1 = `${BASE_CAT}?${p1.toString()}`;
-    meta.upstreamPrimary = url1;
+    const params = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
 
-    const html = await fetchHtml(url1);
-    let items: Item[] = html ? parseEbayHtml(html) : [];
+    const urlPrimary = `${BASE_CAT}?${params.toString()}`;
+    const urlFallback = `${BASE_GENERIC}?${params.toString()}`;
+    meta.upstreamPrimary = urlPrimary;
+    meta.upstreamFallback = urlFallback;
 
+    // 1) try Chrome UA on category-anchored
+    const html1 = await fetchHtml(urlPrimary, UA_CHROME);
+    if (html1 && looksLikeBotCheck(html1)) {
+      return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }), {
+        status: 200,
+        headers: noStoreHeaders(),
+      });
+    }
+    let items: Item[] = html1 ? parseEbayHtml(html1) : [];
+
+    // 2) if empty, try Firefox UA same URL
     if (!items || items.length === 0) {
-      const p2 = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
-      const url2 = `${BASE_GENERIC}?${p2.toString()}`;
-      meta.upstreamFallback = url2;
-      const html2 = await fetchHtml(url2);
+      const html1b = await fetchHtml(urlPrimary, UA_FIREFOX);
+      if (html1b && looksLikeBotCheck(html1b)) {
+        return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }), {
+          status: 200,
+          headers: noStoreHeaders(),
+        });
+      }
+      if (html1b) {
+        const parsed = parseEbayHtml(html1b);
+        if (parsed && parsed.length > 0) items = parsed;
+      }
+    }
+
+    // 3) if still empty, hit generic base with Chrome UA
+    if (!items || items.length === 0) {
+      const html2 = await fetchHtml(urlFallback, UA_CHROME);
+      if (html2 && looksLikeBotCheck(html2)) {
+        return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }), {
+          status: 200,
+          headers: noStoreHeaders(),
+        });
+      }
       if (html2) {
         const parsed2 = parseEbayHtml(html2);
         if (parsed2 && parsed2.length > 0) items = parsed2;
+      }
+    }
+
+    // 4) last try: generic with Firefox UA
+    if (!items || items.length === 0) {
+      const html3 = await fetchHtml(urlFallback, UA_FIREFOX);
+      if (html3 && looksLikeBotCheck(html3)) {
+        return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }), {
+          status: 200,
+          headers: noStoreHeaders(),
+        });
+      }
+      if (html3) {
+        const parsed3 = parseEbayHtml(html3);
+        if (parsed3 && parsed3.length > 0) items = parsed3;
       }
     }
 
@@ -120,7 +188,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const filtered: Item[] = items.filter((it) => {
+    const filtered = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
       if (typeof priceMin === "number" && n < priceMin) return false;
