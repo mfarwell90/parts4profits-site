@@ -100,56 +100,39 @@ export default function SearchForm() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitted(true)
-    setMessage(null)
-    setMetaInfo(null)
-    setSoldMaintenance(false)
+  e.preventDefault()
+  setSubmitted(true)
+  setMessage(null)
+  setMetaInfo(null)
+  setSoldMaintenance(false)
 
-    // Build query strings & eBay links first (used below)
-    const rawQuery = `${year} ${make} ${model} ${details}`.trim()
-    // if junkyard is on, we'll reflect it only on SOLD view link
-    // (active listings ignore junkyard band)
-    const soldParams = new URLSearchParams({
-      _nkw: rawQuery,
-      LH_ItemCondition: '3000',
-      LH_Sold: '1',
-      LH_Complete: '1'
-    })
-    if (junkyard) {
-      soldParams.set('_udlo', '100')
-      soldParams.set('_udhi', '400')
-    }
-    const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
-
-    if (!showActive) {
-      // === Maintenance mode for SOLD/USED ===
-      setLoading(false)
-      setRawResults([])
-      setResults([])
-      setSoldMaintenance(true) // triggers maintenance banner + link
-      // keep lastQS cleared so Retry doesn't try API for sold
-      lastQS.current = ''
-      return
-    }
-
-    // Otherwise run ACTIVE search normally
-    try {
-      setLoading(true)
-      const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '20') // default 20
-      // junkyard does not apply to active API; only affects the sold link
-      lastQS.current = qs.toString()
-      await runSearch(qs, true)
-    } catch (err) {
-      console.error('Search failed:', err)
-      setMessage('Search failed. Try again.')
-      setRawResults([])
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
+  if (!showActive) {
+    // === Maintenance mode for SOLD/USED ===
+    setLoading(false)
+    setRawResults([])
+    setResults([])
+    setSoldMaintenance(true) // triggers maintenance banner + link
+    lastQS.current = ''      // don't retry sold API
+    return
   }
+
+  // Otherwise run ACTIVE search normally
+  try {
+    setLoading(true)
+    const qs = new URLSearchParams({ year, make, model, details })
+    qs.set('limit', '20') // default 20
+    lastQS.current = qs.toString()
+    await runSearch(qs, true)
+  } catch (err) {
+    console.error('Search failed:', err)
+    setMessage('Search failed. Try again.')
+    setRawResults([])
+    setResults([])
+  } finally {
+    setLoading(false)
+  }
+}
+
 
   const retry = async () => {
     if (!lastQS.current) return
