@@ -1,13 +1,13 @@
 // app/components/SearchForm.tsx
 'use client'
 
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 type Item = {
   title: string
   price: string
   currency?: string
-  image?: string
+  image?: string      // kept for type compatibility, but unused
   link: string
   soldDate?: string
 }
@@ -21,7 +21,6 @@ function getFlipTier(priceNum: number): FlipTier {
   if (priceNum <= 300) return 'Star'
   return 'Fire'
 }
-
 function tierEmoji(tier: FlipTier) {
   switch (tier) {
     case 'Trash': return '🗑️'
@@ -31,7 +30,6 @@ function tierEmoji(tier: FlipTier) {
     case 'Fire': return '🔥'
   }
 }
-
 const priceNum = (p?: string) => {
   const n = parseFloat(p || '')
   return Number.isFinite(n) ? n : 0
@@ -48,8 +46,6 @@ export default function SearchForm() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [metaInfo, setMetaInfo] = useState<string | null>(null)
-
-  // show Active disclaimer after any submit, even if the first request failed
   const [submitted, setSubmitted] = useState(false)
 
   const [sortHigh, setSortHigh] = useState(false)
@@ -58,8 +54,6 @@ export default function SearchForm() {
   const [junkyard, setJunkyard] = useState(false)
 
   const haveSearched = rawResults.length > 0
-
-  // keep last query so "Retry" works
   const lastQS = useRef<string>('')
 
   const derivedResults = useMemo(() => {
@@ -75,9 +69,7 @@ export default function SearchForm() {
     return list
   }, [rawResults, junkyard, fireOnly, sortHigh, showActive])
 
-  useEffect(() => {
-    setResults(derivedResults)
-  }, [derivedResults])
+  useEffect(() => { setResults(derivedResults) }, [derivedResults])
 
   const averagePrice = useMemo(() => {
     if (showActive || results.length === 0) return null
@@ -86,35 +78,21 @@ export default function SearchForm() {
   }, [results, showActive])
 
   const runSearch = async (qs: URLSearchParams, active: boolean) => {
-    // always cache-bust; browsers ignore next: {revalidate} on client fetch
-    qs.set('t', String(Date.now()))
+    qs.set('t', String(Date.now())) // cache-bust
     const base = active ? '/api/search-active' : '/api/search'
     const endpoint = `${base}?${qs.toString()}`
     const res = await fetch(endpoint, { cache: 'no-store' })
     const data = await res.json()
-
-    // Accept legacy array or new {items, meta}
     const items: Item[] = Array.isArray(data) ? data : (data?.items ?? [])
     setRawResults(Array.isArray(items) ? items : [])
-    setMetaInfo(
-      !Array.isArray(data) && data?.meta
-        ? JSON.stringify(data.meta)
-        : null
-    )
+    setMetaInfo(!Array.isArray(data) && data?.meta ? JSON.stringify(data.meta) : null)
 
-    // Friendly, specific messages
     if (!Array.isArray(items) || items.length === 0) {
       const reason = (!Array.isArray(data) && (data?.meta?.reason as string)) || ''
-      const upstream = (!Array.isArray(data) && (data?.meta?.upstreamStatus as number)) || undefined
-      if (reason === 'upstream_failed' || reason === 'upstream_blocked') {
-        setMessage(`Upstream is slow or rate-limited${upstream ? ` (status ${upstream})` : ''}. Try again or tweak the query.`)
-      } else if (reason === 'timeout') {
-        setMessage('Timed out fetching results. Try again.')
-      } else if (reason === 'exception') {
-        setMessage('Something went wrong. Try again.')
-      } else {
-        setMessage('No results found for this query.')
-      }
+      if (reason === 'bot_check') setMessage('eBay asked for a human check. Please retry in a moment.')
+      else if (reason === 'empty_parse') setMessage('No results parsed for this query. Try refining it.')
+      else if (reason === 'exception') setMessage('Something went wrong. Try again.')
+      else setMessage('No results found for this query.')
     } else {
       setMessage(null)
     }
@@ -125,13 +103,11 @@ export default function SearchForm() {
     setSubmitted(true)
     setLoading(true)
     setMessage(null)
-
     try {
       const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '50')
-      if (junkyard && !showActive) qs.set('junkyard', '1') // active view ignores this server-side
+      qs.set('limit', '20') // <= DEFAULT 20
+      if (junkyard && !showActive) qs.set('junkyard', '1')
       lastQS.current = qs.toString()
-
       await runSearch(qs, showActive)
     } catch (err) {
       console.error('Search failed:', err)
@@ -254,7 +230,7 @@ export default function SearchForm() {
         )}
       </div>
 
-      {/* Messages & Retry */}
+      {/* Messages */}
       {message && (
         <div style={{ marginTop: '0.75rem', opacity: 0.9 }}>
           {message}{' '}
@@ -271,7 +247,7 @@ export default function SearchForm() {
       )}
       {loading && <p>Loading results…</p>}
 
-      {/* SOLD VIEW */}
+      {/* SOLD VIEW: average + counters */}
       {!showActive && averagePrice && (
         <div
           style={{
@@ -304,7 +280,7 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* ACTIVE VIEW disclaimer — now tied to "submitted" so it always shows after a search */}
+      {/* ACTIVE VIEW disclaimer */}
       {showActive && submitted && (
         <div
           style={{
@@ -322,6 +298,7 @@ export default function SearchForm() {
         </div>
       )}
 
+      {/* Results list — NO THUMBNAILS */}
       {results.length > 0 && (
         <>
           <ul style={{ listStyle: 'none', padding: 0, width: '90%', maxWidth: '700px' }}>
@@ -343,15 +320,6 @@ export default function SearchForm() {
                     background: 'var(--card)'
                   }}
                 >
-                  {item.image && (
-                    <img
-                      src={item.image}
-                      alt={item.title}
-                      width={64}
-                      height={64}
-                      style={{ objectFit: 'cover', marginRight: '1rem', borderRadius: '4px' }}
-                    />
-                  )}
                   <div style={{ flex: 1 }}>
                     <a
                       href={href}
@@ -380,7 +348,7 @@ export default function SearchForm() {
             rel="noopener noreferrer"
             style={{ marginTop: '1rem', color: 'var(--link)' }}
           >
-            See all results on eBay →
+            See more on eBay →
           </a>
         </>
       )}
