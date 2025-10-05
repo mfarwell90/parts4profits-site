@@ -7,7 +7,7 @@ type Item = {
   title: string
   price: string
   currency?: string
-  image?: string      // kept for type compatibility, but unused
+  image?: string // unused on purpose (kept for type compatibility)
   link: string
   soldDate?: string
 }
@@ -47,6 +47,7 @@ export default function SearchForm() {
   const [message, setMessage] = useState<string | null>(null)
   const [metaInfo, setMetaInfo] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
+  const [soldMaintenance, setSoldMaintenance] = useState(false)
 
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
@@ -101,14 +102,45 @@ export default function SearchForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
-    setLoading(true)
     setMessage(null)
+    setMetaInfo(null)
+    setSoldMaintenance(false)
+
+    // Build query strings & eBay links first (used below)
+    const rawQuery = `${year} ${make} ${model} ${details}`.trim()
+    // if junkyard is on, we'll reflect it only on SOLD view link
+    // (active listings ignore junkyard band)
+    const soldParams = new URLSearchParams({
+      _nkw: rawQuery,
+      LH_ItemCondition: '3000',
+      LH_Sold: '1',
+      LH_Complete: '1'
+    })
+    if (junkyard) {
+      soldParams.set('_udlo', '100')
+      soldParams.set('_udhi', '400')
+    }
+    const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
+
+    if (!showActive) {
+      // === Maintenance mode for SOLD/USED ===
+      setLoading(false)
+      setRawResults([])
+      setResults([])
+      setSoldMaintenance(true) // triggers maintenance banner + link
+      // keep lastQS cleared so Retry doesn't try API for sold
+      lastQS.current = ''
+      return
+    }
+
+    // Otherwise run ACTIVE search normally
     try {
+      setLoading(true)
       const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '20') // <= DEFAULT 20
-      if (junkyard && !showActive) qs.set('junkyard', '1')
+      qs.set('limit', '20') // default 20
+      // junkyard does not apply to active API; only affects the sold link
       lastQS.current = qs.toString()
-      await runSearch(qs, showActive)
+      await runSearch(qs, true)
     } catch (err) {
       console.error('Search failed:', err)
       setMessage('Search failed. Try again.')
@@ -230,8 +262,35 @@ export default function SearchForm() {
         )}
       </div>
 
-      {/* Messages */}
-      {message && (
+      {/* Maintenance banner for SOLD/USED */}
+      {!showActive && soldMaintenance && (
+        <div
+          style={{
+            marginTop: '1rem',
+            padding: '0.9rem 1.1rem',
+            backgroundColor: 'var(--muted)',
+            borderRadius: 8,
+            textAlign: 'center',
+            maxWidth: 720
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Used/Sold search is undergoing maintenance.</div>
+          <div style={{ marginBottom: 8 }}>
+            You can view live sold results directly on eBay for this search:
+          </div>
+          <a
+            href={soldSearchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontWeight: 600, color: 'var(--link)' }}
+          >
+            View sold listings on eBay →
+          </a>
+        </div>
+      )}
+
+      {/* Messages (for ACTIVE searches) */}
+      {message && showActive && (
         <div style={{ marginTop: '0.75rem', opacity: 0.9 }}>
           {message}{' '}
           <button onClick={retry} style={{ marginLeft: 8 }} disabled={loading}>
@@ -247,8 +306,8 @@ export default function SearchForm() {
       )}
       {loading && <p>Loading results…</p>}
 
-      {/* SOLD VIEW: average + counters */}
-      {!showActive && averagePrice && (
+      {/* SOLD VIEW: average + counters (only when we actually have results, so hidden in maintenance mode) */}
+      {!showActive && !soldMaintenance && averagePrice && (
         <div
           style={{
             marginTop: '1rem',
@@ -264,7 +323,7 @@ export default function SearchForm() {
         </div>
       )}
 
-      {!showActive && haveSearched && (
+      {!showActive && !soldMaintenance && rawResults.length > 0 && (
         <div
           style={{
             marginTop: '0.75rem',
@@ -298,16 +357,13 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* Results list — NO THUMBNAILS */}
-      {results.length > 0 && (
+      {/* ACTIVE results list (no thumbnails) */}
+      {showActive && results.length > 0 && (
         <>
           <ul style={{ listStyle: 'none', padding: 0, width: '90%', maxWidth: '700px' }}>
             {results.map((item, i) => {
               const tier = getFlipTier(priceNum(item.price))
-              const href = showActive
-                ? `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
-                : item.link
-
+              const href = `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
               return (
                 <li
                   key={i}
@@ -321,12 +377,7 @@ export default function SearchForm() {
                   }}
                 >
                   <div style={{ flex: 1 }}>
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontWeight: 600, color: 'var(--link)' }}
-                    >
+                    <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, color: 'var(--link)' }}>
                       {item.title}
                     </a>
                     <div style={{ marginTop: '0.25rem', color: 'var(--text)' }}>
@@ -343,7 +394,7 @@ export default function SearchForm() {
           </ul>
 
           <a
-            href={showActive ? affiliateSearchUrl : soldSearchUrl}
+            href={affiliateSearchUrl}
             target="_blank"
             rel="noopener noreferrer"
             style={{ marginTop: '1rem', color: 'var(--link)' }}
@@ -351,6 +402,18 @@ export default function SearchForm() {
             See more on eBay →
           </a>
         </>
+      )}
+
+      {/* Always offer a direct “sold” link at the bottom when SOLD mode is selected */}
+      {!showActive && (
+        <a
+          href={soldSearchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ marginTop: '1rem', color: 'var(--link)' }}
+        >
+          Open sold results on eBay →
+        </a>
       )}
     </div>
   )
