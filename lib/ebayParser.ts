@@ -185,13 +185,14 @@ function fromSRPData(html: string): Item[] {
     const visit = (node: unknown) => {
       if (!isObject(node)) return;
       // Look for arrays with listing-like objects
-      for (const [key, val] of Object.entries(node)) {
-        if (Array.isArray(val)) {
-          for (const it of val) visit(it);
-        } else if (isObject(val)) {
-          visit(val);
-        }
-      }
+      for (const val of Object.values(node)) {
+		if (Array.isArray(val)) {
+			for (const it of val) visit(it);
+		} else if (isObject(val)) {
+			visit(val);
+		}
+	}
+
 
       // Heuristic: some nodes have { title, url, price, image } or nested { marketingPrice: { price: { value, currency } } }
       const anyNode = node as Record<string, unknown>;
