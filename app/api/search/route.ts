@@ -28,7 +28,13 @@ function noStoreHeaders() {
   };
 }
 
-function buildParams(rawQuery: string, perPage: number, page: number, priceMin?: number, priceMax?: number) {
+function buildParams(
+  rawQuery: string,
+  perPage: number,
+  page: number,
+  priceMin?: number,
+  priceMax?: number
+) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: "3000",
@@ -47,7 +53,8 @@ function buildParams(rawQuery: string, perPage: number, page: number, priceMin?:
 function headersFor(ua: string) {
   return {
     "user-agent": ua,
-    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "accept-language": "en-US,en;q=0.9",
     "cache-control": "no-store",
     "upgrade-insecure-requests": "1",
@@ -112,13 +119,19 @@ export async function GET(request: NextRequest) {
     const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
-    const limit = Math.max(1, Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240));
+    const limit = Math.max(
+      1,
+      Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240)
+    );
 
     if (!year || !make || !model) {
-      return new NextResponse(JSON.stringify({ items: [], meta: { error: "year make model required" } }), {
-        status: 200,
-        headers: noStoreHeaders(),
-      });
+      return new NextResponse(
+        JSON.stringify({ items: [], meta: { error: "year make model required" } }),
+        {
+          status: 200,
+          headers: noStoreHeaders(),
+        }
+      );
     }
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
@@ -146,10 +159,10 @@ export async function GET(request: NextRequest) {
       const html = await fetchHtml(u, ua);
       if (!html) continue;
       if (looksLikeBotCheck(html)) {
-        return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }), {
-          status: 200,
-          headers: noStoreHeaders(),
-        });
+        return new NextResponse(
+          JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }),
+          { status: 200, headers: noStoreHeaders() }
+        );
       }
       const parsed = parseEbayHtml(html);
       if (parsed.length > 0) {
@@ -159,13 +172,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (!items || items.length === 0) {
-      return new NextResponse(JSON.stringify({ items: [], meta: { ...meta, reason: "empty_parse" } }), {
-        status: 200,
-        headers: noStoreHeaders(),
-      });
+      return new NextResponse(
+        JSON.stringify({ items: [], meta: { ...meta, reason: "empty_parse" } }),
+        { status: 200, headers: noStoreHeaders() }
+      );
     }
 
-    // price band
     const filtered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -174,22 +186,26 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
-    // enforce limit
-	const finalItems: ItemOut[] = filtered.slice(0, limit);
+    const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-// strip images before sending to client (no unused var)
-	const sanitized: ItemOut[] = finalItems.map((it) => {
-	  const copy: Record<string, unknown> = { ...it };
-	  delete (copy as any).image;
-	  return copy as ItemOut;
-	});
+    // remove image keys cleanly (no unused vars)
+    const sanitized: ItemOut[] = finalItems.map((it) => {
+      const copy = { ...it };
+      delete (copy as any).image;
+      return copy;
+    });
 
-meta.count = sanitized.length;
+    meta.count = sanitized.length;
 
-return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
-  status: 200,
-  headers: noStoreHeaders(),
-});
-
+    return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
+      status: 200,
+      headers: noStoreHeaders(),
+    });
+  } catch (err) {
+    console.error("search error:", err);
+    return new NextResponse(
+      JSON.stringify({ items: [], meta: { reason: "exception" } }),
+      { status: 200, headers: noStoreHeaders() }
+    );
   }
 }
