@@ -188,9 +188,10 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // remove image keys cleanly (no unused vars)
-    const sanitized: ItemOut[] = finalItems.map((it) => {
-	  const { image: _omit, ...rest } = (it as ItemOut & { image?: unknown });
+    // remove image key safely, ESLint clean
+	const sanitized: ItemOut[] = finalItems.map((it) => {
+	  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+	  const { image, ...rest } = it as ItemOut & { image?: unknown };
 	  return rest;
 	});
 
@@ -200,6 +201,7 @@ export async function GET(request: NextRequest) {
 	  status: 200,
 	  headers: noStoreHeaders(),
 	});
+
   } catch (err) {
     console.error("search error:", err);
     return new NextResponse(
