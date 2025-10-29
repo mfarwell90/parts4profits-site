@@ -14,7 +14,6 @@ const BASE_CAT = "https://www.ebay.com/sch/6028/i.html";
 const BASE_GENERIC = "https://www.ebay.com/sch/i.html";
 
 const UAS = [
-  // rotate between a few modern UAs
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15",
@@ -48,8 +47,7 @@ function buildParams(rawQuery: string, perPage: number, page: number, priceMin?:
 function headersFor(ua: string) {
   return {
     "user-agent": ua,
-    "accept":
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "accept-language": "en-US,en;q=0.9",
     "cache-control": "no-store",
     "upgrade-insecure-requests": "1",
@@ -132,7 +130,6 @@ export async function GET(request: NextRequest) {
     meta.upstreamPrimary = urlPrimary;
     meta.upstreamFallback = urlFallback;
 
-    // Up to 4 attempts with UA rotation and jitter; stop as soon as we parse items
     const plan = [
       { url: urlPrimary, ua: UAS[0] },
       { url: urlPrimary, ua: UAS[1] },
@@ -142,7 +139,6 @@ export async function GET(request: NextRequest) {
 
     let items: Item[] = [];
     for (let i = 0; i < plan.length; i++) {
-      // small jitter backoff: 250–900ms * attempt#
       const jitter = 250 + Math.floor(Math.random() * 650);
       if (i > 0) await sleep(jitter * i);
 
@@ -178,10 +174,15 @@ export async function GET(request: NextRequest) {
       return true;
     });
 
+    // enforce limit
     const finalItems: ItemOut[] = filtered.slice(0, limit);
-    meta.count = finalItems.length;
 
-    return new NextResponse(JSON.stringify({ items: finalItems, meta }), {
+    // strip images before sending to client
+    const sanitized = finalItems.map(({ image, ...rest }) => rest);
+
+    meta.count = sanitized.length;
+
+    return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
       status: 200,
       headers: noStoreHeaders(),
     });

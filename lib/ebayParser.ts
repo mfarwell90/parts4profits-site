@@ -5,7 +5,6 @@ export type Item = {
   title: string;
   price: string;
   currency?: string;
-  image?: string;
   link: string;
 };
 
@@ -32,10 +31,6 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
       $el.find(".s-item__link").attr("href") ||
       $el.find("a[href^='https://www.ebay.']").attr("href") ||
       "";
-    const image =
-      $el.find(".s-item__image-img").attr("src") ||
-      $el.find("img").attr("src") ||
-      "";
 
     if (!title || /shop on ebay/i.test(title)) return;
     if (!price || !link) return;
@@ -44,7 +39,6 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
       title,
       price,
       link,
-      image: image || undefined,
       currency: /USD/i.test(price) ? "USD" : undefined,
     });
   });
@@ -103,8 +97,6 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
 
             const title = clean(String(item.name ?? ""));
             const link = String(item.url ?? "");
-            const imgRaw = item.image;
-            const image = Array.isArray(imgRaw) ? imgRaw[0] : imgRaw;
             const offers = item.offers;
             const priceVal =
               (offers?.priceSpecification?.price ??
@@ -117,7 +109,7 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
               offers?.priceCurrency ??
               (price.includes("USD") ? "USD" : undefined);
 
-            if (title && link && price) out.push({ title, price, currency, image, link });
+            if (title && link && price) out.push({ title, price, currency, link });
           }
         }
       } catch {
@@ -129,10 +121,6 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
 }
 
 /* ---------------- __SRP_DATA__ pass (embedded window JSON) ---------------- */
-/**
- * eBay often embeds:  window.__SRP_DATA__ = { ... };
- * We extract the JSON blob via brace matching (no fragile regex for nested braces).
- */
 function fromSRPData(html: string): Item[] {
   const out: Item[] = [];
   const marker = "__SRP_DATA__";
@@ -168,8 +156,6 @@ function fromSRPData(html: string): Item[] {
   const jsonText = html.slice(start, end);
   try {
     const root: unknown = JSON.parse(jsonText);
-    // Walk a few common paths where results hide
-    // e.g., root.srpKRs or root.srp or root.searchResults
     const candidates: unknown[] = [];
     if (isObject(root)) {
       for (const k of Object.keys(root)) {
@@ -178,35 +164,27 @@ function fromSRPData(html: string): Item[] {
       }
     }
 
-    const pushItem = (title: string, price: string, link: string, image?: string, currency?: string) => {
-      if (title && price && link) out.push({ title: clean(title), price: clean(price), link, image, currency });
+    const pushItem = (title: string, price: string, link: string, currency?: string) => {
+      if (title && price && link) out.push({ title: clean(title), price: clean(price), link, currency });
     };
 
     const visit = (node: unknown) => {
       if (!isObject(node)) return;
-      // Look for arrays with listing-like objects
       for (const val of Object.values(node)) {
-		if (Array.isArray(val)) {
-			for (const it of val) visit(it);
-		} else if (isObject(val)) {
-			visit(val);
-		}
-	}
+        if (Array.isArray(val)) {
+          for (const it of val) visit(it);
+        } else if (isObject(val)) {
+          visit(val);
+        }
+      }
 
-
-      // Heuristic: some nodes have { title, url, price, image } or nested { marketingPrice: { price: { value, currency } } }
       const anyNode = node as Record<string, unknown>;
       const title = typeof anyNode.title === "string" ? anyNode.title : undefined;
       const url = typeof anyNode.url === "string" ? anyNode.url : undefined;
-      const image =
-        typeof anyNode.image === "string"
-          ? anyNode.image
-          : (Array.isArray(anyNode.images) && typeof anyNode.images[0] === "string" ? (anyNode.images[0] as string) : undefined);
 
       let priceStr: string | undefined;
       let currency: string | undefined;
 
-      // Try several common shapes
       if (typeof anyNode.price === "string") {
         priceStr = anyNode.price;
       } else if (isObject(anyNode.price)) {
@@ -225,7 +203,7 @@ function fromSRPData(html: string): Item[] {
 
       if (title && url && priceStr) {
         const prettyPrice = currency ? `${currency} ${priceStr}` : priceStr;
-        pushItem(title, prettyPrice, url, image, currency);
+        pushItem(title, prettyPrice, url, currency);
       }
     };
 
