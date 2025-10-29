@@ -20,6 +20,7 @@ function getFlipTier(priceNum: number): FlipTier {
   if (priceNum <= 300) return 'Star'
   return 'Fire'
 }
+
 function tierEmoji(tier: FlipTier) {
   switch (tier) {
     case 'Trash': return '🗑️'
@@ -29,6 +30,7 @@ function tierEmoji(tier: FlipTier) {
     case 'Fire': return '🔥'
   }
 }
+
 const priceNum = (p?: string) => {
   const n = parseFloat(p || '')
   return Number.isFinite(n) ? n : 0
@@ -133,7 +135,7 @@ export default function SearchForm() {
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // eBay view on site links
+  // eBay “view on site” links
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000',
@@ -299,4 +301,64 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* ACTIVE results list (no thumbnails)
+      {/* ACTIVE results list (no thumbnails) */}
+      {showActive && results.length > 0 && (
+        <>
+          <ul style={{ listStyle: 'none', padding: 0, width: '90%', maxWidth: '700px' }}>
+            {results.map((item, i) => {
+              const tier = getFlipTier(priceNum(item.price))
+              const href = `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
+              return (
+                <li
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    marginBottom: '1rem',
+                    borderBottom: '1px solid var(--border)',
+                    paddingBottom: '0.75rem',
+                    background: 'var(--card)'
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, color: 'var(--link)' }}>
+                      {item.title}
+                    </a>
+                    <div style={{ marginTop: '0.25rem', color: 'var(--text)' }}>
+                      {item.currency} {item.price}{' '}
+                      {item.soldDate ? <span style={{ opacity: 0.8 }}>• Sold {item.soldDate}</span> : null}
+                    </div>
+                    <div style={{ marginTop: '0.25rem', fontSize: '1rem' }}>
+                      {tierEmoji(tier)}
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+
+          <a
+            href={affiliateSearchUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ marginTop: '1rem', color: 'var(--link)' }}
+          >
+            See more on eBay →
+          </a>
+        </>
+      )}
+
+      {/* Always offer a direct “sold” link at the bottom when SOLD mode is selected */}
+      {!showActive && (
+        <a
+          href={soldSearchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ marginTop: '1rem', color: 'var(--link)' }}
+        >
+          Open sold results on eBay →
+        </a>
+      )}
+    </div>
+  )
+}
