@@ -190,17 +190,16 @@ export async function GET(request: NextRequest) {
 
     // remove image keys cleanly (no unused vars)
     const sanitized: ItemOut[] = finalItems.map((it) => {
-      const copy = { ...it };
-      delete (copy as any).image;
-      return copy;
-    });
+	  const { image: _omit, ...rest } = (it as ItemOut & { image?: unknown });
+	  return rest;
+	});
 
-    meta.count = sanitized.length;
+	meta.count = sanitized.length;
 
-    return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
-      status: 200,
-      headers: noStoreHeaders(),
-    });
+	return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
+	  status: 200,
+	  headers: noStoreHeaders(),
+	});
   } catch (err) {
     console.error("search error:", err);
     return new NextResponse(
