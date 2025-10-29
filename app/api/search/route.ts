@@ -175,21 +175,21 @@ export async function GET(request: NextRequest) {
     });
 
     // enforce limit
-    const finalItems: ItemOut[] = filtered.slice(0, limit);
+	const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // strip images before sending to client
-    const sanitized = finalItems.map(({ image, ...rest }) => rest);
+// strip images before sending to client (no unused var)
+	const sanitized: ItemOut[] = finalItems.map((it) => {
+	  const copy: Record<string, unknown> = { ...it };
+	  delete (copy as any).image;
+	  return copy as ItemOut;
+	});
 
-    meta.count = sanitized.length;
+meta.count = sanitized.length;
 
-    return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
-      status: 200,
-      headers: noStoreHeaders(),
-    });
-  } catch {
-    return new NextResponse(JSON.stringify({ items: [], meta: { reason: "exception" } }), {
-      status: 200,
-      headers: noStoreHeaders(),
-    });
+return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
+  status: 200,
+  headers: noStoreHeaders(),
+});
+
   }
 }
