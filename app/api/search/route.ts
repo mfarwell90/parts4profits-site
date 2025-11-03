@@ -46,7 +46,7 @@ function buildParams(
     rt: "nc",
     _ipg: String(Math.min(Math.max(perPage, 10), 240)),
     _pgn: String(Math.max(page, 1)),
-    _dmd: "2", // request classic server rendered markup
+    _dmd: "2", // force classic server-rendered markup
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
@@ -199,9 +199,11 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
+    // sanitize without unused var: delete 'image' if present
     const sanitized: ItemOut[] = finalItems.map((it) => {
-      const { image, ...rest } = (it as ItemOut & { image?: unknown }) || {};
-      return rest;
+      const copy: Record<string, unknown> = { ...(it as Record<string, unknown>) };
+      if ("image" in copy) delete copy.image;
+      return copy as ItemOut;
     });
 
     meta.count = sanitized.length;
