@@ -1,6 +1,6 @@
 // app/api/search/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { parseEbayHtml, Item } from "../../../lib/ebayParser";
+import { parseEbayHtml, Item, parseLooseRegexOnly } from "../../../lib/ebayParser";
 
 export const runtime = "nodejs";
 export const maxDuration = 20;
@@ -28,7 +28,6 @@ function noStoreHeaders() {
   };
 }
 
-// 13 ended recent, 16 highest price
 function buildParams(
   rawQuery: string,
   perPage: number,
@@ -46,7 +45,7 @@ function buildParams(
     rt: "nc",
     _ipg: String(Math.min(Math.max(perPage, 10), 240)),
     _pgn: String(Math.max(page, 1)),
-    _dmd: "2", // force classic server-rendered markup
+    _dmd: "2", // nudge server-rendered layout
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
@@ -121,6 +120,7 @@ export async function GET(request: NextRequest) {
     const details = url.searchParams.get("details") ?? "";
     const modeParam = (url.searchParams.get("mode") ?? "last").toLowerCase();
     const mode: "last" | "high" = modeParam === "high" ? "high" : "last";
+    const debug = url.searchParams.get("debug") === "1";
 
     const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
@@ -158,6 +158,7 @@ export async function GET(request: NextRequest) {
 
     let items: Item[] = [];
     let used: { url: string; tag: string } | null = null;
+    let lastHtml: string | null = null;
 
     for (let i = 0; i < plan.length; i++) {
       const jitter = 250 + Math.floor(Math.random() * 650);
@@ -166,6 +167,7 @@ export async function GET(request: NextRequest) {
       const { url: u, ua, tag } = plan[i];
       const html = await fetchHtml(u, ua);
       if (!html) continue;
+      lastHtml = html;
       if (looksLikeBotCheck(html)) {
         meta.reason = "bot_check";
         meta.lastTried = { url: u, tag };
@@ -174,7 +176,16 @@ export async function GET(request: NextRequest) {
           headers: noStoreHeaders(),
         });
       }
-      const parsed = parseEbayHtml(html);
+
+      // Try your full parser first
+      let parsed = parseEbayHtml(html);
+
+      // If nothing, try the ultra-loose regex probe
+      if (!parsed.length) {
+        parsed = parseLooseRegexOnly(html).slice(0, 50);
+        if (parsed.length) meta.parsedVia = "regex_probe";
+      }
+
       if (parsed.length > 0) {
         items = parsed;
         used = { url: u, tag };
@@ -183,6 +194,14 @@ export async function GET(request: NextRequest) {
     }
 
     if (!items || items.length === 0) {
+      // Surface what the server actually saw when debug=1
+      if (debug && lastHtml) {
+        meta.debug = {
+          html_has_itm: /\/itm\//.test(lastHtml),
+          html_has_dollar: /\$\s?\d/.test(lastHtml),
+          snippet: lastHtml.slice(0, 1500),
+        };
+      }
       return new NextResponse(
         JSON.stringify({ items: [], meta: { ...meta, reason: "empty_parse" } }),
         { status: 200, headers: noStoreHeaders() }
@@ -199,7 +218,7 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // sanitize without unused var: delete 'image' if present
+    // sanitize without unused-var
     const sanitized: ItemOut[] = finalItems.map((it) => {
       const copy: Record<string, unknown> = { ...(it as Record<string, unknown>) };
       if ("image" in copy) delete copy.image;
@@ -208,6 +227,8 @@ export async function GET(request: NextRequest) {
 
     meta.count = sanitized.length;
     if (used) meta.resolvedVia = used;
+
+    if (debug) meta.sample = sanitized[0] || null;
 
     return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
       status: 200,
