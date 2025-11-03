@@ -53,7 +53,8 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
     const linkEl =
       $el.find("a.s-item__link").first().attr("href") ||
       $el.find("a[href*='/itm/']").first().attr("href") ||
-      $el.find("a[href*='ebay.com/itm']").first().attr("href") || "";
+      $el.find("a[href*='ebay.com/itm']").first().attr("href") ||
+      "";
     const link = normalizeEbayUrl(linkEl);
 
     const title =
@@ -68,12 +69,13 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
       (rawText.match(/\$\s?\d[\d,]*(?:\.\d{2})?/)?.[0] ?? "").trim();
 
     const currency = guessCurrencyFromPrice(price);
-    const soldDate = extractSoldDateFromText(
-      clean(
-        $el.find(".s-item__title--tag, .s-item__details, .s-item__subtitle, .s-item__caption").text() ||
-          rawText
-      )
-    ) || undefined;
+    const soldDate =
+      extractSoldDateFromText(
+        clean(
+          $el.find(".s-item__title--tag, .s-item__details, .s-item__subtitle, .s-item__caption").text() ||
+            rawText
+        )
+      ) || undefined;
 
     if (title && price && link) out.push({ title, price, currency, link, soldDate });
   });
@@ -81,7 +83,11 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
 }
 
 /* ------------ JSON-LD PASS ------------ */
-type JSONLDOffer = { price?: string | number; priceCurrency?: string; priceSpecification?: { price?: string | number; priceCurrency?: string } };
+type JSONLDOffer = {
+  price?: string | number;
+  priceCurrency?: string;
+  priceSpecification?: { price?: string | number; priceCurrency?: string };
+};
 type JSONLDItem = { name?: string; url?: string; image?: string | string[]; price?: string | number; offers?: JSONLDOffer };
 type JSONLDList = { ["@type"]?: string; itemListElement?: Array<{ item?: JSONLDItem } | JSONLDItem> };
 
@@ -96,6 +102,7 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
   $('script[type="application/ld+json"]').each((_, s) => {
     const txt = $(s).contents().text();
     if (!txt) return;
+
     const chunks = txt.replace(/}\s*{/g, "}|||{").split("|||").map((c) => c.trim()).filter(Boolean);
     for (const chunk of chunks) {
       try {
@@ -114,14 +121,23 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
             const title = clean(String(item.name ?? ""));
             const link = normalizeEbayUrl(String(item.url ?? ""));
             const offers = item.offers;
-            const priceVal = (offers?.priceSpecification?.price ?? offers?.price ?? item.price ?? "") as string | number;
+            const priceVal =
+              (offers?.priceSpecification?.price ??
+                offers?.price ??
+                item.price ??
+                "") as string | number;
             const price = clean(String(priceVal));
-            const currency = offers?.priceSpecification?.priceCurrency ?? offers?.priceCurrency ?? guessCurrencyFromPrice(price);
+            const currency =
+              offers?.priceSpecification?.priceCurrency ??
+              offers?.priceCurrency ??
+              guessCurrencyFromPrice(price);
 
             if (title && link && price) out.push({ title, price, currency, link });
           }
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   });
   return out;
@@ -134,63 +150,96 @@ function fromSRPData(html: string): Item[] {
   const idx = html.indexOf(marker);
   if (idx < 0) return out;
 
+  // locate JSON object
   let start = -1;
-  for (let i = idx; i < html.length; i++) if (html[i] === "{") { start = i; break; }
+  for (let i = idx; i < html.length; i++) {
+    if (html[i] === "{") { start = i; break; }
+  }
   if (start < 0) return out;
 
-  let depth = 0, end = -1;
+  let depth = 0;
+  let end = -1;
   for (let i = start; i < html.length; i++) {
     const ch = html[i];
     if (ch === "{") depth++;
-    else if (ch === "}") { depth--; if (depth === 0) { end = i + 1; break; } }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) { end = i + 1; break; }
+    }
   }
   if (end < 0) return out;
 
+  const jsonText = html.slice(start, end);
   try {
-    const root: unknown = JSON.parse(html.slice(start, end));
+    const root: unknown = JSON.parse(jsonText);
     const candidates: unknown[] = [];
-    if (isObject(root)) for (const k of Object.keys(root)) {
-      const v = (root as Record<string, unknown>)[k];
-      if (isObject(v)) candidates.push(v);
+    if (isObject(root)) {
+      for (const k of Object.keys(root)) {
+        const v = (root as Record<string, unknown>)[k];
+        if (isObject(v)) candidates.push(v);
+      }
     }
 
-    const visit = (node: unknown) => {
+    const visit = (node: unknown): void => {
       if (!isObject(node)) return;
-      for (const v of Object.values(node)) Array.isArray(v) ? v.forEach(visit) : isObject(v) && visit(v);
 
-      const any = node as Record<string, unknown>;
-      const title = typeof any.title === "string" ? any.title : undefined;
-      const url = typeof any.url === "string" ? any.url : undefined;
-
-      let priceStr: string | undefined, currency: string | undefined;
-      if (typeof any.price === "string") priceStr = any.price;
-      else if (isObject(any.price)) {
-        const p = any.price as Record<string, unknown>;
-        if (typeof p.value === "string" || typeof p.value === "number") priceStr = String(p.value);
-        if (typeof p.currency === "string") currency = p.currency;
-      }
-      if (!priceStr && isObject(any.marketingPrice)) {
-        const p = (any.marketingPrice as any).price;
-        if (isObject(p)) {
-          if (typeof p.value === "string" || typeof p.value === "number") priceStr = String(p.value);
-          if (typeof p.currency === "string") currency = p.currency;
+      // explicit traversal to satisfy no-unused-expressions
+      const values = Object.values(node);
+      for (const val of values) {
+        if (Array.isArray(val)) {
+          for (const it of val) visit(it);
+        } else if (isObject(val)) {
+          visit(val);
         }
       }
 
-      const metaTxt = [any.subtitle, any.meta, any.badge].map(x => typeof x === "string" ? x : "").join(" ");
-      const soldDate = extractSoldDateFromText(clean(metaTxt));
+      const anyNode = node as Record<string, unknown>;
+      const title = typeof anyNode.title === "string" ? anyNode.title : undefined;
+      const url = typeof anyNode.url === "string" ? anyNode.url : undefined;
 
-      if (title && url && priceStr) out.push({
-        title: clean(title),
-        price: currency ? `${currency} ${priceStr}` : String(priceStr),
-        currency: currency ?? undefined,
-        link: normalizeEbayUrl(url),
-        soldDate,
-      });
+      let priceStr: string | undefined;
+      let currency: string | undefined;
+
+      if (typeof anyNode.price === "string") {
+        priceStr = anyNode.price;
+      } else if (isObject(anyNode.price)) {
+        const p = anyNode.price as Record<string, unknown>;
+        const v = p.value;
+        if (typeof v === "string" || typeof v === "number") priceStr = String(v);
+        if (typeof p.currency === "string") currency = p.currency;
+      }
+
+      if (!priceStr && isObject(anyNode.marketingPrice)) {
+        const mp = anyNode.marketingPrice as Record<string, unknown>;
+        const mpPrice = mp.price;
+        if (isObject(mpPrice)) {
+          const pp = mpPrice as Record<string, unknown>;
+          const vv = pp.value;
+          if (typeof vv === "string" || typeof vv === "number") priceStr = String(vv);
+          if (typeof pp.currency === "string") currency = String(pp.currency);
+        }
+      }
+
+      const subtitle = typeof anyNode.subtitle === "string" ? anyNode.subtitle : "";
+      const meta = typeof anyNode.meta === "string" ? anyNode.meta : "";
+      const badge = typeof anyNode.badge === "string" ? anyNode.badge : "";
+      const soldDate = extractSoldDateFromText(clean(`${subtitle} ${meta} ${badge}`));
+
+      if (title && url && priceStr) {
+        out.push({
+          title: clean(title),
+          price: currency ? `${currency} ${priceStr}` : String(priceStr),
+          currency: currency ?? undefined,
+          link: normalizeEbayUrl(url),
+          soldDate,
+        });
+      }
     };
 
-    candidates.forEach(visit);
-  } catch { /* ignore */ }
+    for (const c of candidates) visit(c);
+  } catch {
+    /* ignore parse errors */
+  }
 
   return out;
 }
@@ -214,7 +263,6 @@ export function parseEbayHtml(html: string): Item[] {
 /* ------------ ULTRA-LOOSE REGEX PROBE (debug aide) ------------ */
 export function parseLooseRegexOnly(html: string): Item[] {
   const out: Item[] = [];
-  // Find /itm/ links with some title-ish text around them
   const anchorRe = /<a[^>]+href="([^"]*\/itm\/[^"]+)"[^>]*>(.*?)<\/a>/gis;
   let m: RegExpExecArray | null;
   const seen = new Set<string>();
@@ -228,7 +276,6 @@ export function parseLooseRegexOnly(html: string): Item[] {
     if (seen.has(link)) continue;
     seen.add(link);
 
-    // Look forward a bit for a $price
     const lookAhead = html.slice(m.index, m.index + 1500);
     const priceMatch = lookAhead.match(/\$\s?\d[\d,]*(?:\.\d{2})?/);
     const price = priceMatch ? priceMatch[0] : "";
