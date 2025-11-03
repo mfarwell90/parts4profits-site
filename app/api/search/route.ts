@@ -10,7 +10,6 @@ export const revalidate = 0;
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
-// Motors > Parts & Accessories category (keeps results tighter for car parts)
 const BASE_CAT = "https://www.ebay.com/sch/6028/i.html";
 const BASE_GENERIC = "https://www.ebay.com/sch/i.html";
 
@@ -29,10 +28,7 @@ function noStoreHeaders() {
   };
 }
 
-// _sop meaning for reference:
-// 13 = End date: recent first  (best for "Last Sold")
-// 16 = Price + shipping: highest first  (best for "High")
-// 10 = Time: newly listed  (not ideal for sold/completed)
+// 13 ended recent, 16 highest price
 function buildParams(
   rawQuery: string,
   perPage: number,
@@ -43,13 +39,14 @@ function buildParams(
 ) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
-    LH_ItemCondition: "3000", // Used
+    LH_ItemCondition: "3000",
     LH_Sold: "1",
     LH_Complete: "1",
     _sop: mode === "high" ? "16" : "13",
     rt: "nc",
     _ipg: String(Math.min(Math.max(perPage, 10), 240)),
     _pgn: String(Math.max(page, 1)),
+    _dmd: "2", // request classic server rendered markup
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
@@ -64,7 +61,6 @@ function headersFor(ua: string) {
     "accept-language": "en-US,en;q=0.9",
     "cache-control": "no-store",
     "upgrade-insecure-requests": "1",
-    // These reduce odd geo-variants and help return the full document
     "sec-fetch-site": "same-origin",
     "sec-fetch-mode": "navigate",
     "sec-fetch-user": "?1",
@@ -126,7 +122,6 @@ export async function GET(request: NextRequest) {
     const modeParam = (url.searchParams.get("mode") ?? "last").toLowerCase();
     const mode: "last" | "high" = modeParam === "high" ? "high" : "last";
 
-    // Junkyard preset price band
     const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
@@ -139,10 +134,7 @@ export async function GET(request: NextRequest) {
     if (!year || !make || !model) {
       return new NextResponse(
         JSON.stringify({ items: [], meta: { error: "year make model required" } }),
-        {
-          status: 200,
-          headers: noStoreHeaders(),
-        }
+        { status: 200, headers: noStoreHeaders() }
       );
     }
 
@@ -151,18 +143,17 @@ export async function GET(request: NextRequest) {
 
     const params = buildParams(rawQuery, perPage, 1, priceMin, priceMax, mode);
 
-    const urlPrimary = `${BASE_CAT}?${params.toString()}`;
-    const urlFallback = `${BASE_GENERIC}?${params.toString()}`;
-    meta.upstreamPrimary = urlPrimary;
-    meta.upstreamFallback = urlFallback;
+    const urlGeneric = `${BASE_GENERIC}?${params.toString()}`;
+    const urlCat = `${BASE_CAT}?${params.toString()}`;
+    meta.upstreamPrimary = urlGeneric;
+    meta.upstreamFallback = urlCat;
     meta.mode = mode;
 
-    // Rotate through UA and endpoints until we get a parseable page
     const plan = [
-      { url: urlPrimary, ua: UAS[0], tag: "cat-chrome" },
-      { url: urlPrimary, ua: UAS[1], tag: "cat-firefox" },
-      { url: urlFallback, ua: UAS[0], tag: "generic-chrome" },
-      { url: urlFallback, ua: UAS[2], tag: "generic-safari" },
+      { url: urlGeneric, ua: UAS[0], tag: "generic-chrome" },
+      { url: urlGeneric, ua: UAS[1], tag: "generic-firefox" },
+      { url: urlCat, ua: UAS[0], tag: "cat-chrome" },
+      { url: urlCat, ua: UAS[2], tag: "cat-safari" },
     ];
 
     let items: Item[] = [];
@@ -198,7 +189,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Optional price band filter
     const filtered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -209,10 +199,8 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // Strip any accidental image fields
     const sanitized: ItemOut[] = finalItems.map((it) => {
-      const { /* eslint-disable-line @typescript-eslint/no-unused-vars */ image, ...rest } =
-        (it as ItemOut & { image?: unknown }) || {};
+      const { image, ...rest } = (it as ItemOut & { image?: unknown }) || {};
       return rest;
     });
 

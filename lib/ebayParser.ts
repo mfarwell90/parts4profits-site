@@ -6,7 +6,7 @@ export type Item = {
   price: string;
   currency?: string;
   link: string;
-  soldDate?: string; // added for your route
+  soldDate?: string;
 };
 
 function clean(s: string): string {
@@ -19,10 +19,8 @@ function isObject(v: unknown): v is Record<string, unknown> {
 
 function normalizeEbayUrl(href: string): string {
   if (!href) return "";
-  // Prefer canonical /itm/ links
   const m = href.match(/https?:\/\/[^/]*ebay\.com\/itm\/[^"?#]+/i);
   if (m) return m[0];
-  // Fallback: keep full href if already absolute
   if (/^https?:\/\//i.test(href)) return href;
   return `https://www.ebay.com${href.startsWith("/") ? "" : "/"}${href}`;
 }
@@ -35,10 +33,8 @@ function guessCurrencyFromPrice(p: string): string | undefined {
 }
 
 function extractSoldDateFromText(txt: string): string | undefined {
-  // Examples seen on SRP:
-  // "Sold Nov 3, 2025", "Sold Oct 29", "Ended: Nov 2, 2025"
   const sold =
-    txt.match(/Sold\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/) ||
+    txt.match(/Sold\s+[A-Za-z]{3}\s+\d{1,2},\s*\d{4}/) ||
     txt.match(/Sold\s+[A-Za-z]{3}\s+\d{1,2}/);
   if (sold) return sold[0].replace(/^Sold\s+/i, "").trim();
 
@@ -48,7 +44,7 @@ function extractSoldDateFromText(txt: string): string | undefined {
   return undefined;
 }
 
-/* ---------------- HTML selectors pass ---------------- */
+/* HTML selectors pass */
 function fromSelectors($: cheerio.CheerioAPI): Item[] {
   const out: Item[] = [];
 
@@ -59,7 +55,6 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
   nodes.each((_, el) => {
     const $el = $(el);
 
-    // Filter sponsored and non-result modules
     const rawText = $el.text();
     if (/Sponsored/i.test(rawText) || /Shop on eBay/i.test(rawText) || /Explore related/i.test(rawText)) {
       return;
@@ -73,14 +68,12 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
 
     const link = normalizeEbayUrl(linkEl);
 
-    // Title priority: explicit title node, aria-label, link text
     const title =
       clean($el.find("h3.s-item__title").first().text()) ||
       clean($el.find("h3").first().text()) ||
       clean($el.find("a.s-item__link").attr("aria-label") || "") ||
       clean($el.find("a").first().text());
 
-    // Price priority: standard price span, otherwise first $… in the card
     const price =
       clean($el.find("span.s-item__price").first().text()) ||
       clean($el.find("span:contains('$')").first().text()) ||
@@ -88,7 +81,6 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
 
     const currency = guessCurrencyFromPrice(price);
 
-    // Sold date often lives in "s-item__title--tag" or secondary meta
     const soldDate =
       extractSoldDateFromText(
         clean(
@@ -106,7 +98,7 @@ function fromSelectors($: cheerio.CheerioAPI): Item[] {
   return out;
 }
 
-/* ---------------- JSON-LD pass ---------------- */
+/* JSON-LD pass */
 type JSONLDOffer = {
   price?: string | number;
   priceCurrency?: string;
@@ -136,7 +128,6 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
     const txt = $(s).contents().text();
     if (!txt) return;
 
-    // Some pages jam multiple JSON objects together
     const chunks = txt
       .replace(/}\s*{/g, "}|||{")
       .split("|||")
@@ -172,7 +163,6 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
               guessCurrencyFromPrice(price);
 
             if (title && link && price) {
-              // JSON-LD usually lacks a soldDate on SRP
               out.push({ title, price, currency, link });
             }
           }
@@ -185,14 +175,13 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
   return out;
 }
 
-/* ---------------- __SRP_DATA__ pass (embedded window JSON) ---------------- */
+/* __SRP_DATA__ pass */
 function fromSRPData(html: string): Item[] {
   const out: Item[] = [];
   const marker = "__SRP_DATA__";
   const idx = html.indexOf(marker);
   if (idx < 0) return out;
 
-  // Find first '{' after marker
   let start = -1;
   for (let i = idx; i < html.length; i++) {
     if (html[i] === "{") {
@@ -202,7 +191,6 @@ function fromSRPData(html: string): Item[] {
   }
   if (start < 0) return out;
 
-  // Brace matching to find the end of the JSON object
   let depth = 0;
   let end = -1;
   for (let i = start; i < html.length; i++) {
@@ -266,7 +254,6 @@ function fromSRPData(html: string): Item[] {
         }
       }
 
-      // sold/ended text sometimes surfaces as "subtitle" or in small meta fields inside SRP data
       let soldDate: string | undefined;
       const metaTxt =
         (typeof (anyNode.subtitle as string) === "string" ? String(anyNode.subtitle) : "") +
@@ -284,7 +271,7 @@ function fromSRPData(html: string): Item[] {
 
     for (const c of candidates) visit(c);
   } catch {
-    /* ignore parse errors */
+    /* ignore */
   }
 
   return out;
@@ -293,21 +280,17 @@ function fromSRPData(html: string): Item[] {
 export function parseEbayHtml(html: string): Item[] {
   const $ = cheerio.load(html);
 
-  // 1) HTML selectors
   let items = fromSelectors($);
   if (items.length > 0) return items;
 
-  // 2) JSON-LD
   items = fromJsonLD($);
   if (items.length > 0) return items;
 
-  // 3) __SRP_DATA__ embedded JSON
   items = fromSRPData(html);
   if (items.length > 0) return items;
 
-  // 4) Very loose fallback: anchor + nearest $… text
   const loose: Item[] = [];
-  $("a[href*='ebay.com/itm']").each((_, a) => {
+  $("a[href*='/itm/'], a[href*='ebay.com/itm']").each((_, a) => {
     const $a = $(a);
     const link = normalizeEbayUrl($a.attr("href") || "");
     const title = clean($a.text());
