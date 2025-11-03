@@ -10,6 +10,7 @@ export const revalidate = 0;
 type ItemOut = Item & { soldDate?: string };
 type ItemWithHref = Item & { link?: string; url?: string; price?: string | number };
 
+// Motors > Parts & Accessories category (keeps results tighter for car parts)
 const BASE_CAT = "https://www.ebay.com/sch/6028/i.html";
 const BASE_GENERIC = "https://www.ebay.com/sch/i.html";
 
@@ -28,19 +29,24 @@ function noStoreHeaders() {
   };
 }
 
+// _sop meaning for reference:
+// 13 = End date: recent first  (best for "Last Sold")
+// 16 = Price + shipping: highest first  (best for "High")
+// 10 = Time: newly listed  (not ideal for sold/completed)
 function buildParams(
   rawQuery: string,
   perPage: number,
   page: number,
   priceMin?: number,
-  priceMax?: number
+  priceMax?: number,
+  mode: "last" | "high" = "last"
 ) {
   const p = new URLSearchParams({
     _nkw: rawQuery,
-    LH_ItemCondition: "3000",
+    LH_ItemCondition: "3000", // Used
     LH_Sold: "1",
     LH_Complete: "1",
-    _sop: "10",
+    _sop: mode === "high" ? "16" : "13",
     rt: "nc",
     _ipg: String(Math.min(Math.max(perPage, 10), 240)),
     _pgn: String(Math.max(page, 1)),
@@ -58,6 +64,7 @@ function headersFor(ua: string) {
     "accept-language": "en-US,en;q=0.9",
     "cache-control": "no-store",
     "upgrade-insecure-requests": "1",
+    // These reduce odd geo-variants and help return the full document
     "sec-fetch-site": "same-origin",
     "sec-fetch-mode": "navigate",
     "sec-fetch-user": "?1",
@@ -116,9 +123,14 @@ export async function GET(request: NextRequest) {
     const make = url.searchParams.get("make") ?? "";
     const model = url.searchParams.get("model") ?? "";
     const details = url.searchParams.get("details") ?? "";
+    const modeParam = (url.searchParams.get("mode") ?? "last").toLowerCase();
+    const mode: "last" | "high" = modeParam === "high" ? "high" : "last";
+
+    // Junkyard preset price band
     const junkyard = url.searchParams.get("junkyard") === "1";
     const priceMin = junkyard ? 100 : undefined;
     const priceMax = junkyard ? 400 : undefined;
+
     const limit = Math.max(
       1,
       Math.min(parseInt(url.searchParams.get("limit") ?? "50", 10) || 50, 240)
@@ -136,37 +148,45 @@ export async function GET(request: NextRequest) {
 
     const rawQuery = `${year} ${make} ${model} ${details}`.trim();
     const perPage = Math.min(Math.max(limit, 10), 120);
-    const params = buildParams(rawQuery, perPage, 1, priceMin, priceMax);
+
+    const params = buildParams(rawQuery, perPage, 1, priceMin, priceMax, mode);
 
     const urlPrimary = `${BASE_CAT}?${params.toString()}`;
     const urlFallback = `${BASE_GENERIC}?${params.toString()}`;
     meta.upstreamPrimary = urlPrimary;
     meta.upstreamFallback = urlFallback;
+    meta.mode = mode;
 
+    // Rotate through UA and endpoints until we get a parseable page
     const plan = [
-      { url: urlPrimary, ua: UAS[0] },
-      { url: urlPrimary, ua: UAS[1] },
-      { url: urlFallback, ua: UAS[0] },
-      { url: urlFallback, ua: UAS[2] },
+      { url: urlPrimary, ua: UAS[0], tag: "cat-chrome" },
+      { url: urlPrimary, ua: UAS[1], tag: "cat-firefox" },
+      { url: urlFallback, ua: UAS[0], tag: "generic-chrome" },
+      { url: urlFallback, ua: UAS[2], tag: "generic-safari" },
     ];
 
     let items: Item[] = [];
+    let used: { url: string; tag: string } | null = null;
+
     for (let i = 0; i < plan.length; i++) {
       const jitter = 250 + Math.floor(Math.random() * 650);
       if (i > 0) await sleep(jitter * i);
 
-      const { url: u, ua } = plan[i];
+      const { url: u, ua, tag } = plan[i];
       const html = await fetchHtml(u, ua);
       if (!html) continue;
       if (looksLikeBotCheck(html)) {
-        return new NextResponse(
-          JSON.stringify({ items: [], meta: { ...meta, reason: "bot_check" } }),
-          { status: 200, headers: noStoreHeaders() }
-        );
+        meta.reason = "bot_check";
+        meta.lastTried = { url: u, tag };
+        return new NextResponse(JSON.stringify({ items: [], meta }), {
+          status: 200,
+          headers: noStoreHeaders(),
+        });
       }
       const parsed = parseEbayHtml(html);
       if (parsed.length > 0) {
         items = parsed;
+        used = { url: u, tag };
         break;
       }
     }
@@ -178,6 +198,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Optional price band filter
     const filtered: Item[] = items.filter((it) => {
       const n = coercePriceToNumber((it as ItemWithHref).price);
       if (n == null) return true;
@@ -188,20 +209,20 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // remove image key safely, ESLint clean
-	const sanitized: ItemOut[] = finalItems.map((it) => {
-	  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-	  const { image, ...rest } = it as ItemOut & { image?: unknown };
-	  return rest;
-	});
+    // Strip any accidental image fields
+    const sanitized: ItemOut[] = finalItems.map((it) => {
+      const { /* eslint-disable-line @typescript-eslint/no-unused-vars */ image, ...rest } =
+        (it as ItemOut & { image?: unknown }) || {};
+      return rest;
+    });
 
-	meta.count = sanitized.length;
+    meta.count = sanitized.length;
+    if (used) meta.resolvedVia = used;
 
-	return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
-	  status: 200,
-	  headers: noStoreHeaders(),
-	});
-
+    return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
+      status: 200,
+      headers: noStoreHeaders(),
+    });
   } catch (err) {
     console.error("search error:", err);
     return new NextResponse(

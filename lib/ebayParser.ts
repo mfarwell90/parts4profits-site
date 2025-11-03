@@ -6,41 +6,101 @@ export type Item = {
   price: string;
   currency?: string;
   link: string;
+  soldDate?: string; // added for your route
 };
 
 function clean(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+
+function normalizeEbayUrl(href: string): string {
+  if (!href) return "";
+  // Prefer canonical /itm/ links
+  const m = href.match(/https?:\/\/[^/]*ebay\.com\/itm\/[^"?#]+/i);
+  if (m) return m[0];
+  // Fallback: keep full href if already absolute
+  if (/^https?:\/\//i.test(href)) return href;
+  return `https://www.ebay.com${href.startsWith("/") ? "" : "/"}${href}`;
+}
+
+function guessCurrencyFromPrice(p: string): string | undefined {
+  if (/\bUSD\b/i.test(p) || p.includes("$")) return "USD";
+  if (/\bGBP\b/i.test(p) || p.includes("£")) return "GBP";
+  if (/\bEUR\b/i.test(p) || p.includes("€")) return "EUR";
+  return undefined;
+}
+
+function extractSoldDateFromText(txt: string): string | undefined {
+  // Examples seen on SRP:
+  // "Sold Nov 3, 2025", "Sold Oct 29", "Ended: Nov 2, 2025"
+  const sold =
+    txt.match(/Sold\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}/) ||
+    txt.match(/Sold\s+[A-Za-z]{3}\s+\d{1,2}/);
+  if (sold) return sold[0].replace(/^Sold\s+/i, "").trim();
+
+  const ended = txt.match(/Ended:\s*[A-Za-z]{3}\s+\d{1,2},\s*\d{4}/);
+  if (ended) return ended[0].replace(/^Ended:\s*/i, "").trim();
+
+  return undefined;
+}
+
 /* ---------------- HTML selectors pass ---------------- */
 function fromSelectors($: cheerio.CheerioAPI): Item[] {
   const out: Item[] = [];
+
   let nodes = $(".s-item");
   if (nodes.length === 0) nodes = $("li.s-item, div.s-item");
   if (nodes.length === 0) nodes = $('[data-view*="mi:"] .s-item');
 
   nodes.each((_, el) => {
     const $el = $(el);
-    const title =
-      clean($el.find(".s-item__title").first().text()) ||
-      clean($el.find(".s-item__title span").first().text());
-    const price =
-      clean($el.find(".s-item__price").first().text()) ||
-      clean($el.find(".s-item__detail--primary").first().text());
-    const link =
-      $el.find(".s-item__link").attr("href") ||
-      $el.find("a[href^='https://www.ebay.']").attr("href") ||
+
+    // Filter sponsored and non-result modules
+    const rawText = $el.text();
+    if (/Sponsored/i.test(rawText) || /Shop on eBay/i.test(rawText) || /Explore related/i.test(rawText)) {
+      return;
+    }
+
+    const linkEl =
+      $el.find("a.s-item__link").first().attr("href") ||
+      $el.find("a[href*='/itm/']").first().attr("href") ||
+      $el.find("a[href*='ebay.com/itm']").first().attr("href") ||
       "";
+
+    const link = normalizeEbayUrl(linkEl);
+
+    // Title priority: explicit title node, aria-label, link text
+    const title =
+      clean($el.find("h3.s-item__title").first().text()) ||
+      clean($el.find("h3").first().text()) ||
+      clean($el.find("a.s-item__link").attr("aria-label") || "") ||
+      clean($el.find("a").first().text());
+
+    // Price priority: standard price span, otherwise first $… in the card
+    const price =
+      clean($el.find("span.s-item__price").first().text()) ||
+      clean($el.find("span:contains('$')").first().text()) ||
+      (rawText.match(/\$\s?\d[\d,]*(?:\.\d{2})?/)?.[0] ?? "").trim();
+
+    const currency = guessCurrencyFromPrice(price);
+
+    // Sold date often lives in "s-item__title--tag" or secondary meta
+    const soldDate =
+      extractSoldDateFromText(
+        clean(
+          $el.find(".s-item__title--tag, .s-item__details, .s-item__subtitle, .s-item__caption").text() ||
+            rawText
+        )
+      ) || undefined;
 
     if (!title || /shop on ebay/i.test(title)) return;
     if (!price || !link) return;
 
-    out.push({
-      title,
-      price,
-      link,
-      currency: /USD/i.test(price) ? "USD" : undefined,
-    });
+    out.push({ title, price, currency, link, soldDate });
   });
 
   return out;
@@ -64,10 +124,6 @@ type JSONLDList = {
   itemListElement?: Array<{ item?: JSONLDItem } | JSONLDItem>;
 };
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
-
 function listFromNode(node: unknown): JSONLDList | null {
   if (!isObject(node)) return null;
   const t = String((node as Record<string, unknown>)["@type"] ?? "").toLowerCase();
@@ -80,7 +136,13 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
     const txt = $(s).contents().text();
     if (!txt) return;
 
-    const chunks = txt.replace(/}\s*{/g, "}|||{").split("|||").map((c) => c.trim()).filter(Boolean);
+    // Some pages jam multiple JSON objects together
+    const chunks = txt
+      .replace(/}\s*{/g, "}|||{")
+      .split("|||")
+      .map((c) => c.trim())
+      .filter(Boolean);
+
     for (const chunk of chunks) {
       try {
         const parsed: unknown = JSON.parse(chunk);
@@ -96,7 +158,7 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
             if (!item) continue;
 
             const title = clean(String(item.name ?? ""));
-            const link = String(item.url ?? "");
+            const link = normalizeEbayUrl(String(item.url ?? ""));
             const offers = item.offers;
             const priceVal =
               (offers?.priceSpecification?.price ??
@@ -107,9 +169,12 @@ function fromJsonLD($: cheerio.CheerioAPI): Item[] {
             const currency =
               offers?.priceSpecification?.priceCurrency ??
               offers?.priceCurrency ??
-              (price.includes("USD") ? "USD" : undefined);
+              guessCurrencyFromPrice(price);
 
-            if (title && link && price) out.push({ title, price, currency, link });
+            if (title && link && price) {
+              // JSON-LD usually lacks a soldDate on SRP
+              out.push({ title, price, currency, link });
+            }
           }
         }
       } catch {
@@ -164,8 +229,8 @@ function fromSRPData(html: string): Item[] {
       }
     }
 
-    const pushItem = (title: string, price: string, link: string, currency?: string) => {
-      if (title && price && link) out.push({ title: clean(title), price: clean(price), link, currency });
+    const pushItem = (title: string, price: string, link: string, currency?: string, soldDate?: string) => {
+      if (title && price && link) out.push({ title: clean(title), price: clean(price), link, currency, soldDate });
     };
 
     const visit = (node: unknown) => {
@@ -201,9 +266,19 @@ function fromSRPData(html: string): Item[] {
         }
       }
 
+      // sold/ended text sometimes surfaces as "subtitle" or in small meta fields inside SRP data
+      let soldDate: string | undefined;
+      const metaTxt =
+        (typeof (anyNode.subtitle as string) === "string" ? String(anyNode.subtitle) : "") +
+        " " +
+        (typeof (anyNode.meta as string) === "string" ? String(anyNode.meta) : "") +
+        " " +
+        (typeof (anyNode.badge as string) === "string" ? String(anyNode.badge) : "");
+      if (metaTxt) soldDate = extractSoldDateFromText(clean(metaTxt));
+
       if (title && url && priceStr) {
         const prettyPrice = currency ? `${currency} ${priceStr}` : priceStr;
-        pushItem(title, prettyPrice, url, currency);
+        pushItem(title, prettyPrice, normalizeEbayUrl(url), currency ?? guessCurrencyFromPrice(prettyPrice), soldDate);
       }
     };
 
@@ -226,23 +301,34 @@ export function parseEbayHtml(html: string): Item[] {
   items = fromJsonLD($);
   if (items.length > 0) return items;
 
-  // 3) __SRP_DATA__ embedded JSON (robust against layout rotations)
+  // 3) __SRP_DATA__ embedded JSON
   items = fromSRPData(html);
   if (items.length > 0) return items;
 
-  // 4) Very loose fallback
+  // 4) Very loose fallback: anchor + nearest $… text
   const loose: Item[] = [];
   $("a[href*='ebay.com/itm']").each((_, a) => {
     const $a = $(a);
-    const link = $a.attr("href") || "";
+    const link = normalizeEbayUrl($a.attr("href") || "");
     const title = clean($a.text());
     if (!title || !link) return;
+
     const ctx = $a.closest("li,div");
+    const ctxText = clean(ctx.text());
     const priceText =
       clean(ctx.find("*:contains('$')").first().text()) ||
-      clean($a.parent().text());
+      (ctxText.match(/\$\s?\d[\d,]*(?:\.\d{2})?/)?.[0] ?? "");
+
+    const soldDate = extractSoldDateFromText(ctxText);
+
     if (/\$\s*\d/.test(priceText)) {
-      loose.push({ title, price: priceText, link });
+      loose.push({
+        title,
+        price: priceText,
+        link,
+        currency: guessCurrencyFromPrice(priceText),
+        soldDate,
+      });
     }
   });
   return loose;
