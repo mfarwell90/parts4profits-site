@@ -150,7 +150,6 @@ function fromSRPData(html: string): Item[] {
   const idx = html.indexOf(marker);
   if (idx < 0) return out;
 
-  // locate JSON object
   let start = -1;
   for (let i = idx; i < html.length; i++) {
     if (html[i] === "{") { start = i; break; }
@@ -183,7 +182,6 @@ function fromSRPData(html: string): Item[] {
     const visit = (node: unknown): void => {
       if (!isObject(node)) return;
 
-      // explicit traversal to satisfy no-unused-expressions
       const values = Object.values(node);
       for (const val of values) {
         if (Array.isArray(val)) {
@@ -260,10 +258,11 @@ export function parseEbayHtml(html: string): Item[] {
   return parseLooseRegexOnly(html);
 }
 
-/* ------------ ULTRA-LOOSE REGEX PROBE (debug aide) ------------ */
+/* ------------ ULTRA-LOOSE REGEX PROBE (no 's' flag) ------------ */
 export function parseLooseRegexOnly(html: string): Item[] {
   const out: Item[] = [];
-  const anchorRe = /<a[^>]+href="([^"]*\/itm\/[^"]+)"[^>]*>(.*?)<\/a>/gis;
+  // Use [\s\S]*? instead of the dotall 's' flag
+  const anchorRe = /<a[^>]+href="([^"]*\/itm\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let m: RegExpExecArray | null;
   const seen = new Set<string>();
 

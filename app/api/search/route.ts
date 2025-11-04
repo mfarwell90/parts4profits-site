@@ -45,7 +45,7 @@ function buildParams(
     rt: "nc",
     _ipg: String(Math.min(Math.max(perPage, 10), 240)),
     _pgn: String(Math.max(page, 1)),
-    _dmd: "2", // nudge server-rendered layout
+    _dmd: "2",
   });
   if (typeof priceMin === "number") p.set("_udlo", String(priceMin));
   if (typeof priceMax === "number") p.set("_udhi", String(priceMax));
@@ -177,10 +177,7 @@ export async function GET(request: NextRequest) {
         });
       }
 
-      // Try your full parser first
       let parsed = parseEbayHtml(html);
-
-      // If nothing, try the ultra-loose regex probe
       if (!parsed.length) {
         parsed = parseLooseRegexOnly(html).slice(0, 50);
         if (parsed.length) meta.parsedVia = "regex_probe";
@@ -194,7 +191,6 @@ export async function GET(request: NextRequest) {
     }
 
     if (!items || items.length === 0) {
-      // Surface what the server actually saw when debug=1
       if (debug && lastHtml) {
         meta.debug = {
           html_has_itm: /\/itm\//.test(lastHtml),
@@ -218,7 +214,6 @@ export async function GET(request: NextRequest) {
 
     const finalItems: ItemOut[] = filtered.slice(0, limit);
 
-    // sanitize without unused-var
     const sanitized: ItemOut[] = finalItems.map((it) => {
       const copy: Record<string, unknown> = { ...(it as Record<string, unknown>) };
       if ("image" in copy) delete copy.image;
@@ -227,7 +222,6 @@ export async function GET(request: NextRequest) {
 
     meta.count = sanitized.length;
     if (used) meta.resolvedVia = used;
-
     if (debug) meta.sample = sanitized[0] || null;
 
     return new NextResponse(JSON.stringify({ items: sanitized, meta }), {
