@@ -358,17 +358,20 @@ export default function SearchForm() {
       )}
 
       {showActive && submitted && (
-        <div
-          style={{
-            marginTop: '0.75rem',
-            padding: '0.75rem 1.25rem',
-            backgroundColor: 'var(--muted)',
-            borderRadius: '8px',
-            textAlign: 'center',
-            lineHeight: 1.5,
-            fontSize: '0.95rem',
-            maxWidth: 720
-          }}
-        >
-          <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
-          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner
+  <div
+    style={{
+      marginTop: '0.75rem',
+      padding: '0.75rem 1.25rem',
+      backgroundColor: 'var(--muted)',
+      borderRadius: '8px',
+      textAlign: 'center',
+      lineHeight: 1.5,
+      fontSize: '0.95rem',
+      maxWidth: 720
+    }}
+  >
+    <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
+    result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay
+    Partner Network.
+  </div>
+)}
