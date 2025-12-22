@@ -59,9 +59,8 @@ export default function SearchForm() {
   const derivedResults = useMemo(() => {
     let list = [...rawResults]
 
-    // These filters only apply to on site parsed results
-    // Active results still render on site (affiliate)
-    // Sold mode will open eBay directly (no on site list)
+    // On site filters only apply to parsed ACTIVE results list
+    // SOLD mode opens eBay directly (no parsing)
     if (!showActive && junkyard) {
       list = list.filter(it => {
         const n = priceNum(it.price)
@@ -106,7 +105,7 @@ export default function SearchForm() {
 
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // SOLD search URL (opens in new tab)
+  // SOLD search URL (opens in a new tab)
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000',
@@ -119,12 +118,12 @@ export default function SearchForm() {
     soldParams.set('_udhi', '400')
   }
   if (fireOnly) {
-    // Approximation: "Fire" filter becomes "show sold listings at $300+"
+    // Approximation: Fire filter -> show sold listings at $300+
     soldParams.set('_udlo', '300')
   }
   const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
 
-  // ACTIVE search URL (on site results still use affiliate links)
+  // ACTIVE search URL (keeps affiliate behavior)
   const activeParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000'
@@ -154,7 +153,7 @@ export default function SearchForm() {
     setMessage(null)
     setMetaInfo(null)
 
-    // ACTIVE stays exactly as you built it
+    // ACTIVE stays on site with affiliate links
     if (showActive) {
       try {
         setLoading(true)
@@ -174,12 +173,12 @@ export default function SearchForm() {
       return
     }
 
-    // SOLD mode: stop scraping, open eBay directly
+    // SOLD mode: open eBay directly
     openSold()
   }
 
   const retry = async () => {
-    // Only makes sense for ACTIVE mode now
+    // Retry behaves correctly for both modes
     if (!showActive) {
       openSold()
       return
@@ -234,7 +233,7 @@ export default function SearchForm() {
               setMessage(null)
               setMetaInfo(null)
 
-              // When switching to SOLD mode, clear active results so the sold section looks intentional
+              // When switching to SOLD mode, clear prior on site results so the sold view stays clean
               if (!next) {
                 setRawResults([])
                 setResults([])
@@ -253,7 +252,7 @@ export default function SearchForm() {
                 checked={sortHigh}
                 onChange={() => setSortHigh(!sortHigh)}
                 style={{ marginRight: '0.5rem' }}
-                disabled={!showActive} // only affects on site list
+                disabled={!showActive}
               />
               Sort by Highest Price
             </label>
@@ -333,6 +332,18 @@ export default function SearchForm() {
         </div>
       )}
 
+      {/* SOLD mode helper link always visible */}
+      {!showActive && (
+        <a
+          href={soldSearchUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ marginTop: '1rem', color: 'var(--link)' }}
+        >
+          Open sold results on eBay →
+        </a>
+      )}
+
       {/* ACTIVE VIEW disclaimer */}
       {showActive && submitted && (
         <div
@@ -348,4 +359,8 @@ export default function SearchForm() {
           }}
         >
           <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
-          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner
+          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
+        </div>
+      )}
+
+      {/* ACTIVE results list
