@@ -12,11 +12,11 @@ type Item = {
 
 type FlipTier = 'Trash' | 'ThumbsUp' | 'Check' | 'Star' | 'Fire'
 
-function getFlipTier(priceNum: number): FlipTier {
-  if (priceNum < 15) return 'Trash'
-  if (priceNum <= 75) return 'ThumbsUp'
-  if (priceNum <= 150) return 'Check'
-  if (priceNum <= 300) return 'Star'
+function getFlipTier(p: number): FlipTier {
+  if (p < 15) return 'Trash'
+  if (p <= 75) return 'ThumbsUp'
+  if (p <= 150) return 'Check'
+  if (p <= 300) return 'Star'
   return 'Fire'
 }
 
@@ -30,8 +30,9 @@ function tierEmoji(tier: FlipTier) {
   }
 }
 
-const priceNum = (p?: string) => {
-  const n = parseFloat(p || '')
+function toPriceNum(p?: string) {
+  const cleaned = (p || '').replace(/[^0-9.]/g, '')
+  const n = parseFloat(cleaned)
   return Number.isFinite(n) ? n : 0
 }
 
@@ -50,41 +51,57 @@ export default function SearchForm() {
 
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
-  const [showActive, setShowActive] = useState(false) // false = SOLD mode, true = ACTIVE mode
+  const [showActive, setShowActive] = useState(false) // false = SOLD, true = ACTIVE
   const [junkyard, setJunkyard] = useState(false)
 
-  const haveSearched = rawResults.length > 0
   const lastQS = useRef<string>('')
 
-  const derivedResults = useMemo(() => {
-    let list = [...rawResults]
+  const campaignId = process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID || ''
 
-    // On site filters only apply to parsed ACTIVE results list
-    // SOLD mode opens eBay directly (no parsing)
-    if (!showActive && junkyard) {
-      list = list.filter(it => {
-        const n = priceNum(it.price)
-        return n >= 100 && n <= 400
-      })
+  const rawQuery = `${year} ${make} ${model} ${details}`.trim()
+
+  const soldParams = new URLSearchParams({
+    _nkw: rawQuery,
+    LH_ItemCondition: '3000',
+    LH_Sold: '1',
+    LH_Complete: '1',
+    _sop: '13'
+  })
+  if (junkyard) {
+    soldParams.set('_udlo', '100')
+    soldParams.set('_udhi', '400')
+  }
+  if (fireOnly) {
+    soldParams.set('_udlo', '300')
+  }
+  const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
+
+  const activeParams = new URLSearchParams({
+    _nkw: rawQuery,
+    LH_ItemCondition: '3000'
+  })
+  const activeSearchUrl = `https://www.ebay.com/sch/6028/i.html?${activeParams.toString()}`
+  const affiliateSearchUrl =
+    `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
+    `${encodeURIComponent(campaignId)}&toolid=10001&mpre=` +
+    `${encodeURIComponent(activeSearchUrl)}`
+
+  const openSold = () => {
+    setSubmitted(true)
+    setMessage(null)
+    setMetaInfo(null)
+
+    if (!year || !make || !model) {
+      setMessage('Year, Make, and Model are required.')
+      return
     }
-    if (fireOnly) list = list.filter(it => priceNum(it.price) >= 300)
-    if (sortHigh) list.sort((a, b) => priceNum(b.price) - priceNum(a.price))
-    return list
-  }, [rawResults, junkyard, fireOnly, sortHigh, showActive])
 
-  useEffect(() => { setResults(derivedResults) }, [derivedResults])
+    window.open(soldSearchUrl, '_blank', 'noopener,noreferrer')
+  }
 
-  const averagePrice = useMemo(() => {
-    if (showActive || results.length === 0) return null
-    const total = results.reduce((sum, item) => sum + priceNum(item.price), 0)
-    return (total / results.length).toFixed(2)
-  }, [results, showActive])
-
-  const runSearch = async (qs: URLSearchParams, active: boolean) => {
-    qs.set('t', String(Date.now())) // cache bust
-    const base = active ? '/api/search-active' : '/api/search'
-    const endpoint = `${base}?${qs.toString()}`
-
+  const runActiveSearch = async (qs: URLSearchParams) => {
+    qs.set('t', String(Date.now()))
+    const endpoint = `/api/search-active?${qs.toString()}`
     const res = await fetch(endpoint, { cache: 'no-store' })
     const data = await res.json()
 
@@ -103,38 +120,39 @@ export default function SearchForm() {
     }
   }
 
-  const rawQuery = `${year} ${make} ${model} ${details}`.trim()
+  const derivedResults = useMemo(() => {
+    let list = [...rawResults]
 
-  // SOLD search URL (opens in a new tab)
-  const soldParams = new URLSearchParams({
-    _nkw: rawQuery,
-    LH_ItemCondition: '3000',
-    LH_Sold: '1',
-    LH_Complete: '1',
-    _sop: '13'
-  })
-  if (junkyard) {
-    soldParams.set('_udlo', '100')
-    soldParams.set('_udhi', '400')
-  }
-  if (fireOnly) {
-    // Approximation: Fire filter -> show sold listings at $300+
-    soldParams.set('_udlo', '300')
-  }
-  const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
+    if (fireOnly) list = list.filter(it => toPriceNum(it.price) >= 300)
+    if (sortHigh) list.sort((a, b) => toPriceNum(b.price) - toPriceNum(a.price))
 
-  // ACTIVE search URL (keeps affiliate behavior)
-  const activeParams = new URLSearchParams({
-    _nkw: rawQuery,
-    LH_ItemCondition: '3000'
-  })
-  const activeSearchUrl = `https://www.ebay.com/sch/6028/i.html?${activeParams.toString()}`
-  const affiliateSearchUrl =
-    `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
-    `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
-    `${encodeURIComponent(activeSearchUrl)}`
+    return list
+  }, [rawResults, fireOnly, sortHigh])
 
-  const openSold = () => {
+  useEffect(() => {
+    setResults(derivedResults)
+  }, [derivedResults])
+
+  const averagePrice = useMemo(() => {
+    if (showActive) return null
+    if (results.length === 0) return null
+    const total = results.reduce((sum, item) => sum + toPriceNum(item.price), 0)
+    return (total / results.length).toFixed(2)
+  }, [results, showActive])
+
+  const counts = useMemo(() => {
+    return results.reduce(
+      (acc, item) => {
+        const tier = getFlipTier(toPriceNum(item.price))
+        acc[tier] = (acc[tier] || 0) + 1
+        return acc
+      },
+      { Trash: 0, ThumbsUp: 0, Check: 0, Star: 0, Fire: 0 } as Record<FlipTier, number>
+    )
+  }, [results])
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
     setSubmitted(true)
     setMessage(null)
     setMetaInfo(null)
@@ -144,16 +162,6 @@ export default function SearchForm() {
       return
     }
 
-    window.open(soldSearchUrl, '_blank', 'noopener,noreferrer')
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitted(true)
-    setMessage(null)
-    setMetaInfo(null)
-
-    // ACTIVE stays on site with affiliate links
     if (showActive) {
       try {
         setLoading(true)
@@ -161,9 +169,9 @@ export default function SearchForm() {
         qs.set('limit', '20')
         qs.set('junkyard', junkyard ? '1' : '0')
         lastQS.current = qs.toString()
-        await runSearch(qs, true)
+        await runActiveSearch(qs)
       } catch (err) {
-        console.error('Search failed:', err)
+        console.error('Active search failed:', err)
         setMessage('Search failed. Try again.')
         setRawResults([])
         setResults([])
@@ -173,12 +181,10 @@ export default function SearchForm() {
       return
     }
 
-    // SOLD mode: open eBay directly
     openSold()
   }
 
   const retry = async () => {
-    // Retry behaves correctly for both modes
     if (!showActive) {
       openSold()
       return
@@ -187,20 +193,11 @@ export default function SearchForm() {
     setLoading(true)
     setMessage(null)
     try {
-      await runSearch(new URLSearchParams(lastQS.current), true)
+      await runActiveSearch(new URLSearchParams(lastQS.current))
     } finally {
       setLoading(false)
     }
   }
-
-  const counts = results.reduce(
-    (acc, item) => {
-      const tier = getFlipTier(priceNum(item.price))
-      acc[tier] = (acc[tier] || 0) + 1
-      return acc
-    },
-    { Trash: 0, ThumbsUp: 0, Check: 0, Star: 0, Fire: 0 } as Record<FlipTier, number>
-  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -221,7 +218,6 @@ export default function SearchForm() {
         </button>
       </form>
 
-      {/* Controls */}
       <div style={{ display: 'flex', gap: '1rem', marginTop: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <label style={{ cursor: 'pointer' }}>
           <input
@@ -232,8 +228,6 @@ export default function SearchForm() {
               setShowActive(next)
               setMessage(null)
               setMetaInfo(null)
-
-              // When switching to SOLD mode, clear prior on site results so the sold view stays clean
               if (!next) {
                 setRawResults([])
                 setResults([])
@@ -244,7 +238,7 @@ export default function SearchForm() {
           Show Active Listings
         </label>
 
-        {(submitted || loading || showActive || haveSearched) && (
+        {(submitted || loading || showActive || rawResults.length > 0) && (
           <>
             <label style={{ cursor: 'pointer' }}>
               <input
@@ -274,13 +268,12 @@ export default function SearchForm() {
                 onChange={e => setJunkyard(e.target.checked)}
                 style={{ marginRight: '0.5rem' }}
               />
-              Junkyard Specialties $100–$400
+              Junkyard Specialties $100 to $400
             </label>
           </>
         )}
       </div>
 
-      {/* Message */}
       {message && (
         <div style={{ marginTop: '0.75rem', opacity: 0.9, textAlign: 'center' }}>
           {message}{' '}
@@ -295,9 +288,9 @@ export default function SearchForm() {
           )}
         </div>
       )}
+
       {loading && <p>Loading results…</p>}
 
-      {/* SOLD MODE copy */}
       {!showActive && submitted && (
         <div
           style={{
@@ -332,19 +325,38 @@ export default function SearchForm() {
         </div>
       )}
 
-      {/* SOLD mode helper link always visible */}
-      {!showActive && (
-        <a
-          href={soldSearchUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ marginTop: '1rem', color: 'var(--link)' }}
+      {!showActive && averagePrice && (
+        <div
+          style={{
+            marginTop: '1rem',
+            padding: '0.5rem 1rem',
+            backgroundColor: 'var(--muted)',
+            borderRadius: '8px',
+            textAlign: 'center',
+            fontSize: '1.2rem',
+            fontWeight: 'bold'
+          }}
         >
-          Open sold results on eBay →
-        </a>
+          📈 Average Sold Price: ${averagePrice}
+        </div>
       )}
 
-      {/* ACTIVE VIEW disclaimer */}
+      {!showActive && results.length > 0 && (
+        <div
+          style={{
+            marginTop: '0.75rem',
+            padding: '0.75rem 1.25rem',
+            backgroundColor: 'var(--muted)',
+            borderRadius: '8px',
+            textAlign: 'center',
+            lineHeight: 1.5,
+            fontSize: '1.05rem'
+          }}
+        >
+          🔥 {counts.Fire}  •  ⭐ {counts.Star}  •  ✔️ {counts.Check}  •  👍 {counts.ThumbsUp}  •  🗑️ {counts.Trash}
+        </div>
+      )}
+
       {showActive && submitted && (
         <div
           style={{
@@ -359,8 +371,4 @@ export default function SearchForm() {
           }}
         >
           <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
-          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
-        </div>
-      )}
-
-      {/* ACTIVE results list
+          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner
