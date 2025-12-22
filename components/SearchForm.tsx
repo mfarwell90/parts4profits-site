@@ -1,4 +1,3 @@
-// app/components/SearchForm.tsx
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -51,7 +50,7 @@ export default function SearchForm() {
 
   const [sortHigh, setSortHigh] = useState(false)
   const [fireOnly, setFireOnly] = useState(false)
-  const [showActive, setShowActive] = useState(false) // off means SOLD/USED mode
+  const [showActive, setShowActive] = useState(false) // false = SOLD mode, true = ACTIVE mode
   const [junkyard, setJunkyard] = useState(false)
 
   const haveSearched = rawResults.length > 0
@@ -59,6 +58,10 @@ export default function SearchForm() {
 
   const derivedResults = useMemo(() => {
     let list = [...rawResults]
+
+    // These filters only apply to on site parsed results
+    // Active results still render on site (affiliate)
+    // Sold mode will open eBay directly (no on site list)
     if (!showActive && junkyard) {
       list = list.filter(it => {
         const n = priceNum(it.price)
@@ -79,11 +82,13 @@ export default function SearchForm() {
   }, [results, showActive])
 
   const runSearch = async (qs: URLSearchParams, active: boolean) => {
-    qs.set('t', String(Date.now())) // cache-bust
+    qs.set('t', String(Date.now())) // cache bust
     const base = active ? '/api/search-active' : '/api/search'
     const endpoint = `${base}?${qs.toString()}`
+
     const res = await fetch(endpoint, { cache: 'no-store' })
     const data = await res.json()
+
     const items: Item[] = Array.isArray(data) ? data : (data?.items ?? [])
     setRawResults(Array.isArray(items) ? items : [])
     setMetaInfo(!Array.isArray(data) && data?.meta ? JSON.stringify(data.meta) : null)
@@ -99,55 +104,27 @@ export default function SearchForm() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSubmitted(true)
-    setMessage(null)
-    setMetaInfo(null)
-
-    try {
-      setLoading(true)
-      const qs = new URLSearchParams({ year, make, model, details })
-      qs.set('limit', '20')
-      qs.set('junkyard', junkyard ? '1' : '0')
-      lastQS.current = qs.toString()
-      await runSearch(qs, showActive) // false = SOLD, true = ACTIVE
-    } catch (err) {
-      console.error('Search failed:', err)
-      setMessage('Search failed. Try again.')
-      setRawResults([])
-      setResults([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const retry = async () => {
-    if (!lastQS.current) return
-    setLoading(true)
-    setMessage(null)
-    try {
-      await runSearch(new URLSearchParams(lastQS.current), showActive)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const rawQuery = `${year} ${make} ${model} ${details}`.trim()
 
-  // eBay “view on site” links
+  // SOLD search URL (opens in new tab)
   const soldParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000',
     LH_Sold: '1',
-    LH_Complete: '1'
+    LH_Complete: '1',
+    _sop: '13'
   })
   if (junkyard) {
     soldParams.set('_udlo', '100')
     soldParams.set('_udhi', '400')
   }
+  if (fireOnly) {
+    // Approximation: "Fire" filter becomes "show sold listings at $300+"
+    soldParams.set('_udlo', '300')
+  }
   const soldSearchUrl = `https://www.ebay.com/sch/6028/i.html?${soldParams.toString()}`
 
+  // ACTIVE search URL (on site results still use affiliate links)
   const activeParams = new URLSearchParams({
     _nkw: rawQuery,
     LH_ItemCondition: '3000'
@@ -157,6 +134,65 @@ export default function SearchForm() {
     `https://rover.ebay.com/rover/1/711-53200-19255-0/1?campid=` +
     `${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001&mpre=` +
     `${encodeURIComponent(activeSearchUrl)}`
+
+  const openSold = () => {
+    setSubmitted(true)
+    setMessage(null)
+    setMetaInfo(null)
+
+    if (!year || !make || !model) {
+      setMessage('Year, Make, and Model are required.')
+      return
+    }
+
+    window.open(soldSearchUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitted(true)
+    setMessage(null)
+    setMetaInfo(null)
+
+    // ACTIVE stays exactly as you built it
+    if (showActive) {
+      try {
+        setLoading(true)
+        const qs = new URLSearchParams({ year, make, model, details })
+        qs.set('limit', '20')
+        qs.set('junkyard', junkyard ? '1' : '0')
+        lastQS.current = qs.toString()
+        await runSearch(qs, true)
+      } catch (err) {
+        console.error('Search failed:', err)
+        setMessage('Search failed. Try again.')
+        setRawResults([])
+        setResults([])
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // SOLD mode: stop scraping, open eBay directly
+    openSold()
+  }
+
+  const retry = async () => {
+    // Only makes sense for ACTIVE mode now
+    if (!showActive) {
+      openSold()
+      return
+    }
+    if (!lastQS.current) return
+    setLoading(true)
+    setMessage(null)
+    try {
+      await runSearch(new URLSearchParams(lastQS.current), true)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const counts = results.reduce(
     (acc, item) => {
@@ -182,7 +218,7 @@ export default function SearchForm() {
         <input placeholder="Model" value={model} onChange={e => setModel(e.target.value)} required />
         <input placeholder="Details (opt.)" value={details} onChange={e => setDetails(e.target.value)} />
         <button type="submit" disabled={loading}>
-          {loading ? 'Searching…' : 'Search'}
+          {loading ? 'Searching…' : (showActive ? 'Search Active' : 'View Sold Results')}
         </button>
       </form>
 
@@ -192,13 +228,24 @@ export default function SearchForm() {
           <input
             type="checkbox"
             checked={showActive}
-            onChange={() => setShowActive(!showActive)}
+            onChange={() => {
+              const next = !showActive
+              setShowActive(next)
+              setMessage(null)
+              setMetaInfo(null)
+
+              // When switching to SOLD mode, clear active results so the sold section looks intentional
+              if (!next) {
+                setRawResults([])
+                setResults([])
+              }
+            }}
             style={{ marginRight: '0.5rem' }}
           />
           Show Active Listings
         </label>
 
-        {(haveSearched || submitted || loading) && (
+        {(submitted || loading || showActive || haveSearched) && (
           <>
             <label style={{ cursor: 'pointer' }}>
               <input
@@ -206,6 +253,7 @@ export default function SearchForm() {
                 checked={sortHigh}
                 onChange={() => setSortHigh(!sortHigh)}
                 style={{ marginRight: '0.5rem' }}
+                disabled={!showActive} // only affects on site list
               />
               Sort by Highest Price
             </label>
@@ -233,9 +281,9 @@ export default function SearchForm() {
         )}
       </div>
 
-      {/* Messages for either mode */}
+      {/* Message */}
       {message && (
-        <div style={{ marginTop: '0.75rem', opacity: 0.9 }}>
+        <div style={{ marginTop: '0.75rem', opacity: 0.9, textAlign: 'center' }}>
           {message}{' '}
           <button onClick={retry} style={{ marginLeft: 8 }} disabled={loading}>
             Retry
@@ -250,36 +298,38 @@ export default function SearchForm() {
       )}
       {loading && <p>Loading results…</p>}
 
-      {/* SOLD VIEW: average + counters */}
-      {!showActive && averagePrice && (
+      {/* SOLD MODE copy */}
+      {!showActive && submitted && (
         <div
           style={{
-            marginTop: '1rem',
-            padding: '0.5rem 1rem',
-            backgroundColor: 'var(--muted)',
-            borderRadius: '8px',
-            textAlign: 'center',
-            fontSize: '1.2rem',
-            fontWeight: 'bold'
-          }}
-        >
-          📈 Average Sold Price: ${averagePrice}
-        </div>
-      )}
-
-      {!showActive && rawResults.length > 0 && (
-        <div
-          style={{
-            marginTop: '0.75rem',
-            padding: '0.75rem 1.25rem',
+            marginTop: '0.9rem',
+            padding: '0.8rem 1.1rem',
             backgroundColor: 'var(--muted)',
             borderRadius: '8px',
             textAlign: 'center',
             lineHeight: 1.5,
-            fontSize: '1.05rem'
+            fontSize: '0.95rem',
+            maxWidth: 720
           }}
         >
-          🔥 {counts.Fire}  •  ⭐ {counts.Star}  •  ✔️ {counts.Check}  •  👍 {counts.ThumbsUp}  •  🗑️ {counts.Trash}
+          Sold listings open directly on eBay for maximum accuracy and reliability.
+          Your filters above still apply and will be included in the eBay search.
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              onClick={openSold}
+              style={{
+                padding: '0.55rem 0.95rem',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--card)',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              Open Sold Results on eBay →
+            </button>
+          </div>
         </div>
       )}
 
@@ -293,72 +343,9 @@ export default function SearchForm() {
             borderRadius: '8px',
             textAlign: 'center',
             lineHeight: 1.5,
-            fontSize: '0.95rem'
+            fontSize: '0.95rem',
+            maxWidth: 720
           }}
         >
           <strong>DISCLAIMER:</strong> When you click on links to various merchants on this site and make a purchase, this can
-          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner Network.
-        </div>
-      )}
-
-      {/* ACTIVE results list (no thumbnails) */}
-      {showActive && results.length > 0 && (
-        <>
-          <ul style={{ listStyle: 'none', padding: 0, width: '90%', maxWidth: '700px' }}>
-            {results.map((item, i) => {
-              const tier = getFlipTier(priceNum(item.price))
-              const href = `${item.link}${item.link.includes('?') ? '&' : '?'}mkevt=1&mkcid=1&mkrid=711-53200-19255-0&campid=${process.env.NEXT_PUBLIC_EBAY_CAMPAIGN_ID}&toolid=10001`
-              return (
-                <li
-                  key={i}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    marginBottom: '1rem',
-                    borderBottom: '1px solid var(--border)',
-                    paddingBottom: '0.75rem',
-                    background: 'var(--card)'
-                  }}
-                >
-                  <div style={{ flex: 1 }}>
-                    <a href={href} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, color: 'var(--link)' }}>
-                      {item.title}
-                    </a>
-                    <div style={{ marginTop: '0.25rem', color: 'var(--text)' }}>
-                      {item.currency} {item.price}{' '}
-                      {item.soldDate ? <span style={{ opacity: 0.8 }}>• Sold {item.soldDate}</span> : null}
-                    </div>
-                    <div style={{ marginTop: '0.25rem', fontSize: '1rem' }}>
-                      {tierEmoji(tier)}
-                    </div>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-
-          <a
-            href={affiliateSearchUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ marginTop: '1rem', color: 'var(--link)' }}
-          >
-            See more on eBay →
-          </a>
-        </>
-      )}
-
-      {/* Always offer a direct “sold” link at the bottom when SOLD mode is selected */}
-      {!showActive && (
-        <a
-          href={soldSearchUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ marginTop: '1rem', color: 'var(--link)' }}
-        >
-          Open sold results on eBay →
-        </a>
-      )}
-    </div>
-  )
-}
+          result in this site earning a commission. Affiliate programs and affiliations include, but are not limited to, the eBay Partner
