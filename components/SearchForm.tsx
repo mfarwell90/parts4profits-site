@@ -56,8 +56,11 @@ export default function SearchForm() {
     LH_Sold: '1',
     LH_Complete: '1',
     LH_ItemCondition: '3000',
-    _sop: '13'
-  })
+    _sop: sortHigh ? '16' : '13'
+  <input type="checkbox" checked={sortHigh} onChange={e => setSortHigh(e.target.checked)} />
+
+})
+
   if (junkyard) {
     soldParams.set('_udlo', '100')
     soldParams.set('_udhi', '400')
