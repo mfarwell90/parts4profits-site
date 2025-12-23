@@ -57,7 +57,8 @@ export default function SearchForm() {
     LH_Complete: '1',
     LH_ItemCondition: '3000',
     _sop: sortHigh ? '16' : '13'
-  <input type="checkbox" checked={sortHigh} onChange={e => setSortHigh(e.target.checked)} />
+    disabled={!showActive}
+
 
 })
 
